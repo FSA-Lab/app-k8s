@@ -1,4 +1,5 @@
 import { channel } from "./connection";
+import { sagaEventCounter } from "@shared/tracing/metrics";
 
 export async function publishEvent(
     routingKey: string,
@@ -9,4 +10,5 @@ export async function publishEvent(
         routingKey,
         Buffer.from(JSON.stringify(payload))
     );
+    sagaEventCounter.inc({ event_name: routingKey, service: "order-service" });
 }

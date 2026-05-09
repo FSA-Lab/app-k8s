@@ -1,4 +1,4 @@
-# This ia project that is not production grade but lab
+# Microservice CICD lab project
 
 The app is microservice app that has these services:
 
@@ -10,70 +10,78 @@ The app is microservice app that has these services:
 each has its own db and all is drizzle with js node. the app run in k8s microservice. lets assume i have frontend static page that call api to k8s kong gateway 
 
 ## Phase 1:
-i want an example for this app that can run docker compose locally
+docker compose locally
 
 ### Data schema:
 **(inventory-service)**
+
 item:
--id
--name
--stock
--price
+- id
+- name
+- stock
+- price
+- created_at
 
 **(order-service)**
+
 order_item:
--id
--order_id (one to one)
--item_id (one to one)
--quantity
--price_at_purchase
+- id
+- order_id (FK → orders)
+- item_id
+- quantity
+- price_at_purchase
 
 order:
--id
--user_id (one to one)
--total_price
--status(done, ongoing, failed)
+- id
+- user_id
+- total_price
+- status(done, ongoing, failed)
+- created_at
 
 **(payment-service)**
+
 payment:
--id
--order_id (one to one)
--price
--status(paid, failed)
+- id
+- order_id (unique, one to one)
+- price
+- status(paid, failed)
+- created_at
 
 **(auth-service)**
+
 user:
--id
--name
--email
--password_hash
--role(user, admin)
--coin
+- id
+- name
+- email
+- password_hash
+- role(user, admin)
+- coin
+- created_at
 
 ### Folder structure:
-/kong (for routing the endpoint)
-/auth (user sign up, admin seed)
-/inventory (crud)
-/order (crud)
-/payment (crud)
-/rabbitmq
+
+/kong (gateway routing config)
+/services
+    /auth-service (user auth, internal endpoints)
+    /inventory-service (items CRUD, stock reservation)
+    /order-service (orders CRUD, saga orchestrator)
+    /payment-service (payment processing, saga participant)
 /shared/packages
-    /auth
-        index.ts
-        package.json
-    /events
-package.json
+    /auth (JWT, middleware)
+    /events (saga event constants + types)
+    /tracing (OpenTelemetry, Prometheus metrics, pino logger)
 
 ### Routes
 
 **Auth**
+
 POST /signup
 - user sign up (user default has 1000 coins)
 
 POST /login
 - user login
 
-GET /me
+GET /me (require auth)
 - get current user
 
 POST /logout
@@ -82,40 +90,50 @@ POST /logout
 POST /seed-admin
 - admin seed user(script)
 
+GET /users/:id (internal)
+- get user by id (used by payment-service)
+
+PATCH /users/:id/coins (internal)
+- update user coins (used by payment-service)
+
 **Inventory**
-GET /items
-- list inventory 
+
+GET /items (require auth)
+- list inventory
 
 POST /items (admin only)
 - create item
 
-PATCH /items/:id 
+PATCH /items/:id/stock (require auth)
 - update the stock (for queue to consume and update the stock)
 
-
 **Order**
-GET /order
-- list order (include order items)
 
-GET /order/:id
-- get single order (include order items)
+GET /orders (require auth)
+- list current user's orders
 
-POST /order (require auth)
-- create order (saga)
+GET /orders/:id (require auth)
+- get single order with items
+
+POST /orders (require auth)
+- create order (saga start)
 
 **Payment**
-GET /payment
-- list payment
 
-POST /payment (require auth)
-- pay (fake, coin deduct from user coins)
+GET /payments (require auth)
+- list payments
+
+POST /payments (require auth)
+- manual payment (for testing)
 
 **rabbitmq event**
-ORDER_CREATED: "order.created",
-INVENTORY_RESERVED: "inventory.reserved",
-INVENTORY_FAILED: "inventory.failed",
-PAYMENT_COMPLETED: "payment.completed",
-PAYMENT_FAILED: "payment.failed",
+
+ORDER_CREATED: "order.created"
+ORDER_FAILED: "order.failed" (compensation — triggers stock rollback)
+INVENTORY_RESERVED: "inventory.reserved"
+INVENTORY_FAILED: "inventory.failed"
+PAYMENT_COMPLETED: "payment.completed"
+PAYMENT_FAILED: "payment.failed"
 
 ## Phase 2: Observability (OpenTelemetry + Prometheus + Grafana)
 
@@ -139,7 +157,7 @@ Add distributed tracing, metrics collection, and dashboards to all 4 services.
               │             │
               ▼             ▼
            Jaeger        Grafana         ← dashboards + traces UI
-          :16686        :3001
+          :16686        :3004
 ```
 
 ### What's Added
@@ -171,6 +189,7 @@ Add distributed tracing, metrics collection, and dashboards to all 4 services.
 - Search traces by service, operation, duration
 - View full request lifecycle across services
 - See RabbitMQ message spans linked to HTTP spans via trace context propagation
+- **How to use:** In Jaeger UI, select an app service (`auth-service`, `inventory-service`, `order-service`, `payment-service`) from the Service dropdown — NOT `jaeger-all-in-one`. Make an API call first, then click "Find Traces".
 
 ### New Dependencies (per service)
 
@@ -189,7 +208,7 @@ pino
 | UI | URL | Credentials |
 |---|---|---|
 | Kong Gateway | http://localhost:8000 | — |
-| Grafana | http://localhost:3001 | admin / admin |
+| Grafana | http://localhost:3004 | admin / admin |
 | Prometheus | http://localhost:9090 | — |
 | Jaeger | http://localhost:16686 | — |
 | RabbitMQ | http://localhost:15672 | guest / guest |
@@ -201,6 +220,7 @@ shared/packages/tracing/       # @shared/tracing package
   package.json
   index.ts                     # OTel SDK init
   metrics.ts                   # prom-client setup
+  logger.ts                    # pino logger with trace correlation
 
 otel/
   otel-config.yml              # OTel Collector config
@@ -222,4 +242,34 @@ grafana/
 docker-compose up --build
 ```
 
-Then open Grafana at http://localhost:3001 and explore the "Microservices" dashboard.
+Then open Grafana at http://localhost:3004 and explore the "Microservices" dashboard.
+
+## Phase 3: k8s and cicd deployment
+
+Deploy the app to Kubernetes with a Jenkins CI/CD pipeline.
+
+### What's Covered
+
+**Kubernetes Manifests**
+- Deployments, Services, ConfigMaps, Secrets for all 4 services + infrastructure (PostgreSQL, RabbitMQ, Kong, OTel stack)
+- Liveness and readiness probes for all services
+- Resource limits (CPU/memory) per service
+
+**Configuration & Secrets**
+- Kubernetes Secrets for sensitive values: DB passwords, JWT secret, RabbitMQ credentials
+- ConfigMaps for non-sensitive config: database names, OTel endpoints, Prometheus scrape targets
+- Per-environment overrides (dev/staging/prod)
+
+**Helm Charts or Kustomize**
+- Parameterized templates for environment-specific configuration
+- Separate namespaces per environment (dev, staging, prod)
+
+**Jenkins CI/CD Pipeline**
+- Stages: checkout → install deps → lint → build Docker images → push to registry → deploy to k8s → run smoke tests
+- Branch-based deployment (main → prod, develop → staging)
+
+**Docker Registry**
+- Push built images to a registry (DockerHub, ECR, or local)
+
+**Ingress**
+- Kubernetes Ingress or Kong as ingress controller for external access

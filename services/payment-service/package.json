@@ -2,6 +2,7 @@
   "dependencies": {
     "@shared/auth": "^1.0.0",
     "@shared/events": "^1.0.0",
+    "@shared/tracing": "^1.0.0",
     "@types/pg": "^8.20.0",
     "amqplib": "^1.0.7",
     "dotenv": "^17.4.2",

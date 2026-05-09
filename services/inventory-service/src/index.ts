@@ -1,3 +1,4 @@
+import "@shared/tracing";
 import express, { Request, Response } from "express";
 import amqp from "amqplib";
 
@@ -10,7 +11,10 @@ import { authMiddleware, adminMiddleware } from "@shared/auth";
 import { EVENTS } from "@shared/events";
 import { connectRabbitMQ } from "./rabbitmq/connection";
 import { publishEvent } from "./rabbitmq/publisher";
+import { register, metricsMiddleware } from "@shared/tracing/metrics";
+import { createLogger } from "@shared/tracing/logger";
 
+const logger = createLogger("inventory-service");
 
 async function bootstrap() {
     try {
@@ -33,7 +37,7 @@ async function bootstrap() {
 
                 const data = JSON.parse(msg.content.toString());
                 const routingKey = msg.fields.routingKey;
-                console.log(`[inventory-consumer] ${routingKey}`, data);
+                logger.info({ routingKey, orderId: data.orderId }, "event received");
 
                 try {
                     if (routingKey === EVENTS.ORDER_CREATED) {
@@ -55,10 +59,10 @@ async function bootstrap() {
                                 await db.update(items).set({ stock: dbItem.stock - orderItem.quantity }).where(eq(items.id, orderItem.item_id));
                             }
                             await publishEvent(EVENTS.INVENTORY_RESERVED, { orderId: data.orderId, userId: data.userId, totalPrice: data.totalPrice });
-                            console.log(`[inventory-consumer] inventory.reserved for order ${data.orderId}`);
+                            logger.info({ orderId: data.orderId }, "inventory.reserved");
                         } else {
                             await publishEvent(EVENTS.INVENTORY_FAILED, { orderId: data.orderId, userId: data.userId, totalPrice: data.totalPrice, reason: "insufficient stock" });
-                            console.log(`[inventory-consumer] inventory.failed for order ${data.orderId}`);
+                            logger.warn({ orderId: data.orderId }, "inventory.failed — insufficient stock");
                         }
                     }
 
@@ -73,23 +77,28 @@ async function bootstrap() {
                                 await db.update(items).set({ stock: dbItem.stock + orderItem.quantity }).where(eq(items.id, orderItem.item_id));
                             }
                         }
-                        console.log(`[inventory-consumer] stock restored for failed order ${data.orderId}`);
+                        logger.info({ orderId: data.orderId }, "stock restored for failed order");
                     }
                 } catch (err) {
-                    console.error("[inventory-consumer] error processing event:", err);
+                    logger.error(err, "error processing event");
                 }
 
                 consumerChannel.ack(msg);
             });
 
-            console.log("inventory-consumer started");
+            logger.info("inventory-consumer started");
         }
 
         startInventoryConsumer();
 
         const app = express();
-
+        app.use(metricsMiddleware);
         app.use(express.json());
+
+        app.get("/metrics", async (_req: Request, res: Response) => {
+            res.set("Content-Type", register.contentType);
+            res.end(await register.metrics());
+        });
 
         /**
          * GET /items
@@ -106,6 +115,7 @@ async function bootstrap() {
 
                     return res.json(data);
                 } catch (err) {
+                    logger.error(err, "fetch items failed");
                     return res.status(500).json({
                         message: "Failed to fetch items",
                     });
@@ -134,8 +144,11 @@ async function bootstrap() {
                         })
                         .returning();
 
+                    logger.info({ item: created[0] }, "item created");
+
                     return res.status(201).json(created);
                 } catch (err) {
+                    logger.error(err, "create item failed");
                     return res.status(500).json({
                         message: "Failed to create item",
                     });
@@ -166,6 +179,7 @@ async function bootstrap() {
 
                     return res.json(updated);
                 } catch (err) {
+                    logger.error(err, "update stock failed");
                     return res.status(500).json({
                         message: "Failed to update stock",
                     });
@@ -174,15 +188,10 @@ async function bootstrap() {
         );
 
         app.listen(3000, () => {
-            console.log(
-                "inventory-service running on port 3000"
-            );
+            logger.info("inventory-service running on port 3000");
         });
-
-
-        console.log("inventory-service started successfully");
     } catch (err) {
-        console.error(err);
+        logger.error(err, "Failed to start inventory-service");
         process.exit(1);
     }
 }

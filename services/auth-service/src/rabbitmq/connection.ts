@@ -1,5 +1,7 @@
 import amqp from "amqplib";
+import { createLogger } from "@shared/tracing/logger";
 
+const logger = createLogger("auth-service");
 export let channel: amqp.Channel;
 
 export async function connectRabbitMQ(retries = 10) {
@@ -8,10 +10,10 @@ export async function connectRabbitMQ(retries = 10) {
             const conn = await amqp.connect(process.env.RABBITMQ_URL!);
             channel = await conn.createChannel();
             await channel.assertExchange("app.events", "topic", { durable: true });
-            console.log("RabbitMQ connected");
+            logger.info("RabbitMQ connected");
             return conn;
         } catch (err) {
-            console.log(`RabbitMQ not ready, retrying... (${i + 1})`);
+            logger.warn(`RabbitMQ not ready, retrying... (${i + 1})`);
             await new Promise(r => setTimeout(r, 2000));
         }
     }

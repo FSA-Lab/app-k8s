@@ -1,3 +1,4 @@
+import "@shared/tracing";
 import express, { Request, Response } from "express";
 import bcrypt from "bcrypt";
 import { eq } from "drizzle-orm";
@@ -6,7 +7,11 @@ import { db, checkDb } from "./db/db";
 import { users } from "./db/schema";
 import { connectRabbitMQ } from "./rabbitmq/connection";
 
-import { generateToken, authMiddleware, adminMiddleware } from "@shared/auth";
+import { generateToken, authMiddleware } from "@shared/auth";
+import { register, metricsMiddleware } from "@shared/tracing/metrics";
+import { createLogger } from "@shared/tracing/logger";
+
+const logger = createLogger("auth-service");
 
 async function bootstrap() {
     try {
@@ -14,7 +19,13 @@ async function bootstrap() {
         await connectRabbitMQ();
 
         const app = express();
+        app.use(metricsMiddleware);
         app.use(express.json());
+
+        app.get("/metrics", async (_req: Request, res: Response) => {
+            res.set("Content-Type", register.contentType);
+            res.end(await register.metrics());
+        });
 
         // POST /signup
         app.post("/signup", async (req: Request, res: Response) => {
@@ -40,6 +51,8 @@ async function bootstrap() {
                     role: "user"
                 }).returning();
 
+                logger.info({ userId: newUser.id }, "user signed up");
+
                 return res.status(201).json({
                     id: newUser.id,
                     name: newUser.name,
@@ -48,7 +61,7 @@ async function bootstrap() {
                     role: newUser.role
                 });
             } catch (err) {
-                console.error(err);
+                logger.error(err, "signup failed");
                 return res.status(500).json({ message: "Internal server error" });
             }
         });
@@ -79,9 +92,11 @@ async function bootstrap() {
                     role: user.role
                 });
 
+                logger.info({ userId: user.id }, "user logged in");
+
                 return res.json({ token });
             } catch (err) {
-                console.error(err);
+                logger.error(err, "login failed");
                 return res.status(500).json({ message: "Internal server error" });
             }
         });
@@ -112,7 +127,7 @@ async function bootstrap() {
                     role: user.role
                 });
             } catch (err) {
-                console.error(err);
+                logger.error(err, "fetch /me failed");
                 return res.status(500).json({ message: "Internal server error" });
             }
         });
@@ -141,6 +156,8 @@ async function bootstrap() {
                     role: "admin"
                 }).returning();
 
+                logger.info({ userId: newUser.id }, "admin seeded");
+
                 return res.status(201).json({
                     id: newUser.id,
                     name: newUser.name,
@@ -148,7 +165,7 @@ async function bootstrap() {
                     role: newUser.role
                 });
             } catch (err) {
-                console.error(err);
+                logger.error(err, "seed-admin failed");
                 return res.status(500).json({ message: "Internal server error" });
             }
         });
@@ -164,7 +181,7 @@ async function bootstrap() {
                 const user = result[0];
                 return res.json({ id: user.id, name: user.name, email: user.email, coin: user.coin, role: user.role });
             } catch (err) {
-                console.error(err);
+                logger.error(err, "fetch user failed");
                 return res.status(500).json({ message: "Internal server error" });
             }
         });
@@ -184,20 +201,20 @@ async function bootstrap() {
                     return res.status(404).json({ message: "User not found" });
                 }
 
+                logger.info({ userId: id, coin }, "coins updated");
+
                 return res.json({ id: updated.id, coin: updated.coin });
             } catch (err) {
-                console.error(err);
+                logger.error(err, "update coins failed");
                 return res.status(500).json({ message: "Internal server error" });
             }
         });
 
         app.listen(3000, () => {
-            console.log("auth-service running on port 3000");
+            logger.info("auth-service running on port 3000");
         });
-
-        console.log("auth-service started successfully");
     } catch (err) {
-        console.error("Failed to start auth-service:", err);
+        logger.error(err, "Failed to start auth-service");
         process.exit(1);
     }
 }

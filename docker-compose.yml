@@ -74,7 +74,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
-  
+
   payment-db:
     image: postgres:15
     environment:
@@ -82,7 +82,7 @@ services:
       POSTGRES_PASSWORD: password
       POSTGRES_DB: payment
     ports:
-      - "5435:5432" # to avoid port conflict other db
+      - "5435:5432"
     healthcheck:
       test: [ "CMD-SHELL", "pg_isready -U root -d payment" ]
       interval: 5s
@@ -98,6 +98,8 @@ services:
       - DATABASE_URL=postgres://root:password@auth-db:5432/auth
       - RABBITMQ_URL=amqp://rabbitmq:5672
       - JWT_SECRET=super-secret-key-for-lab-only
+      - OTEL_SERVICE_NAME=auth-service
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
     ports:
       - "3000:3000"
     depends_on:
@@ -105,6 +107,8 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+      otel-collector:
+        condition: service_started
 
   inventory-service:
     build:
@@ -114,6 +118,8 @@ services:
       - DATABASE_URL=postgres://root:password@inventory-db:5432/inventory
       - RABBITMQ_URL=amqp://rabbitmq:5672
       - JWT_SECRET=super-secret-key-for-lab-only
+      - OTEL_SERVICE_NAME=inventory-service
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
     ports:
       - "3001:3000"
     depends_on:
@@ -121,7 +127,9 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
-  
+      otel-collector:
+        condition: service_started
+
   order-service:
     build:
       context: .
@@ -130,6 +138,8 @@ services:
       - DATABASE_URL=postgres://root:password@order-db:5432/order
       - RABBITMQ_URL=amqp://rabbitmq:5672
       - JWT_SECRET=super-secret-key-for-lab-only
+      - OTEL_SERVICE_NAME=order-service
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
     ports:
       - "3002:3000"
     depends_on:
@@ -137,6 +147,8 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+      otel-collector:
+        condition: service_started
 
   payment-service:
     build:
@@ -147,6 +159,8 @@ services:
       - RABBITMQ_URL=amqp://rabbitmq:5672
       - JWT_SECRET=super-secret-key-for-lab-only
       - AUTH_SERVICE_URL=http://auth-service:3000
+      - OTEL_SERVICE_NAME=payment-service
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
     ports:
       - "3003:3000"
     depends_on:
@@ -154,6 +168,8 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+      otel-collector:
+        condition: service_started
 
   # Migration services
   migrate-auth:
@@ -207,3 +223,46 @@ services:
     depends_on:
       payment-db:
         condition: service_healthy
+
+  # Observability stack
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    ports:
+      - "16686:16686"
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+
+  otel-collector:
+    image: otel/opentelemetry-collector:latest
+    command: ["--config=/etc/otel-config.yml"]
+    volumes:
+      - ./otel/otel-config.yml:/etc/otel-config.yml:ro
+    ports:
+      - "4318:4318"
+    depends_on:
+      - jaeger
+
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    depends_on:
+      - auth-service
+      - inventory-service
+      - order-service
+      - payment-service
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3004:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus

@@ -1,0 +1,16 @@
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: "auth-service"
+    static_configs:
+      - targets: ["auth-service:3000"]
+  - job_name: "inventory-service"
+    static_configs:
+      - targets: ["inventory-service:3000"]
+  - job_name: "order-service"
+    static_configs:
+      - targets: ["order-service:3000"]
+  - job_name: "payment-service"
+    static_configs:
+      - targets: ["payment-service:3000"]

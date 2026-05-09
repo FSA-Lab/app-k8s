@@ -1,3 +1,4 @@
+import "@shared/tracing";
 import express, { Request, Response } from "express";
 import amqp from "amqplib";
 
@@ -9,6 +10,10 @@ import { authMiddleware } from "@shared/auth";
 import { EVENTS } from "@shared/events";
 import { connectRabbitMQ } from "./rabbitmq/connection";
 import { publishEvent } from "./rabbitmq/publisher";
+import { register, metricsMiddleware } from "@shared/tracing/metrics";
+import { createLogger } from "@shared/tracing/logger";
+
+const logger = createLogger("order-service");
 
 async function bootstrap() {
     try {
@@ -16,8 +21,13 @@ async function bootstrap() {
         await connectRabbitMQ();
 
         const app = express();
-
+        app.use(metricsMiddleware);
         app.use(express.json());
+
+        app.get("/metrics", async (_req: Request, res: Response) => {
+            res.set("Content-Type", register.contentType);
+            res.end(await register.metrics());
+        });
 
 
         async function startOrderConsumer() {
@@ -39,16 +49,14 @@ async function bootstrap() {
                 const data = JSON.parse(msg.content.toString());
                 const routingKey = msg.fields.routingKey;
 
-                console.log(`[order-consumer] ${routingKey}`, data);
+                logger.info({ routingKey, orderId: data.orderId }, "event received");
 
                 if (routingKey === EVENTS.INVENTORY_FAILED) {
-                    // Stock was never deducted, no compensation needed
                     await db.update(orders).set({ status: "failed" }).where(eq(orders.id, data.orderId));
-                    console.log(`[order-consumer] order ${data.orderId} failed (inventory)`);
+                    logger.info({ orderId: data.orderId }, "order failed (inventory)");
                 }
 
                 if (routingKey === EVENTS.PAYMENT_FAILED) {
-                    // Stock was deducted, need compensation rollback
                     await db.update(orders).set({ status: "failed" }).where(eq(orders.id, data.orderId));
 
                     const orderItemsList = await db.select().from(orderItems).where(eq(orderItems.order_id, data.orderId));
@@ -57,17 +65,18 @@ async function bootstrap() {
                         userId: data.userId,
                         items: orderItemsList.map(i => ({ item_id: i.item_id, quantity: i.quantity })),
                     });
-                    console.log(`[order-consumer] order ${data.orderId} failed (payment) — stock rollback published`);
+                    logger.info({ orderId: data.orderId }, "order failed (payment) — stock rollback published");
                 }
 
                 if (routingKey === EVENTS.PAYMENT_COMPLETED) {
                     await db.update(orders).set({ status: "done" }).where(eq(orders.id, data.orderId));
+                    logger.info({ orderId: data.orderId }, "order completed");
                 }
 
                 consumerChannel.ack(msg);
             });
 
-            console.log("order-consumer started");
+            logger.info("order-consumer started");
         }
 
         startOrderConsumer();
@@ -87,13 +96,12 @@ async function bootstrap() {
 
                 return res.json(data);
             } catch (err) {
+                logger.error(err, "fetch orders failed");
                 return res.status(500).json({
-                    message:
-                        "Failed to fetch orders",
+                    message: "Failed to fetch orders",
                 });
             }
-        }
-        );
+        });
 
         /**
          * GET /orders/:id
@@ -115,9 +123,6 @@ async function bootstrap() {
                     });
                 }
 
-                /**
-                 * ownership check
-                 */
                 if (order[0].user_id !== userId) {
                     return res.status(403).json({
                         message: "Forbidden",
@@ -134,6 +139,7 @@ async function bootstrap() {
                     items,
                 });
             } catch (err) {
+                logger.error(err, "fetch order failed");
                 return res.status(500).json({
                     message: "Failed to fetch order",
                 });
@@ -142,8 +148,7 @@ async function bootstrap() {
 
         /**
          * POST /orders
-         * create order
-         * saga start
+         * create order — saga start
          */
         app.post(
             "/orders",
@@ -152,16 +157,6 @@ async function bootstrap() {
                 try {
                     const userId = req.user!.id;
 
-                    /**
-                     * frontend sends:
-                     * items: [
-                     *   {
-                     *     item_id,
-                     *     quantity,
-                     *     price
-                     *   }
-                     * ]
-                     */
                     const {
                         items,
                     }: {
@@ -172,9 +167,6 @@ async function bootstrap() {
                         }[];
                     } = req.body;
 
-                    /**
-                     * calculate total
-                     */
                     const totalPrice =
                         items.reduce(
                             (acc, item) =>
@@ -184,9 +176,6 @@ async function bootstrap() {
                             0
                         );
 
-                    /**
-                     * create order
-                     */
                     const createdOrder =
                         await db
                             .insert(orders)
@@ -201,9 +190,6 @@ async function bootstrap() {
                     const orderId =
                         createdOrder[0].id;
 
-                    /**
-                     * create order items
-                     */
                     await db
                         .insert(orderItems)
                         .values(
@@ -215,9 +201,6 @@ async function bootstrap() {
                             }))
                         );
 
-                    /**
-                     * publish saga event
-                     */
                     const event = {
                         event: EVENTS.ORDER_CREATED,
                         orderId,
@@ -228,33 +211,27 @@ async function bootstrap() {
 
                     await publishEvent(EVENTS.ORDER_CREATED, event);
 
+                    logger.info({ orderId, userId, totalPrice }, "order created — saga started");
 
                     return res.status(201).json({
-                        message:
-                            "Order created",
+                        message: "Order created",
                         orderId,
                         status: "ongoing",
                     });
                 } catch (err) {
-                    console.error(err);
-
+                    logger.error(err, "create order failed");
                     return res.status(500).json({
-                        message:
-                            "Failed to create order",
+                        message: "Failed to create order",
                     });
                 }
             }
         );
 
         app.listen(3000, () => {
-            console.log(
-                "order-service running on 3000"
-            );
+            logger.info("order-service running on 3000");
         });
-
-        console.log("order-service started successfully");
     } catch (err) {
-        console.error(err);
+        logger.error(err, "Failed to start order-service");
         process.exit(1);
     }
 
