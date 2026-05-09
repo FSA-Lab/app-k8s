@@ -1,0 +1,22 @@
+
+services:
+  kong:
+  rabbitmq:
+    image: rabbitmq:3-management
+
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+
+
+  
+
+  auth-db:
+  inventory-db:
+  order-db:
+  payment-db:
+
+  auth-service:
+  inventory-service:
+  order-service:
+  payment-service:
