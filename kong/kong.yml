@@ -1,0 +1,24 @@
+_format_version: "3.0"
+services:
+  - name: auth-service
+    url: http://auth-service:3000
+    routes:
+      - name: auth-route
+        paths:
+          - /auth
+        strip_path: true
+  - name: inventory-service
+    url: http://inventory-service:3000
+    routes:
+      - name: inventory-route
+        paths:
+          - /items
+        strip_path: false
+  - name: order-service
+    url: http://order-service:3000
+    routes:
+      - name: order-route
+        paths:
+          - /orders
+        strip_path: false
+

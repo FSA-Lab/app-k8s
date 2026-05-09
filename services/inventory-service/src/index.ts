@@ -1,13 +1,11 @@
 import express, { Request, Response } from "express";
 
-import { db } from "./db/db";
+import { db, checkDb } from "./db/db";
 import { items } from "./db/schema";
-import { checkDb } from "./db/db";
 
 import { eq } from "drizzle-orm";
 
-import { authMiddleware } from "./middleware/auth";
-import { adminMiddleware } from "./middleware/admin";
+import { authMiddleware, adminMiddleware } from "@shared/auth";
 import { connectRabbitMQ } from "./rabbitmq/connection";
 
 

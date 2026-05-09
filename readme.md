@@ -59,8 +59,10 @@ user:
 /rabbitmq
 /shared/packages
     /auth
+        index.ts
+        package.json
     /events
-
+package.json
 
 ### Routes
 
@@ -113,5 +115,6 @@ ORDER_CREATED: "order.created",
 INVENTORY_RESERVED: "inventory.reserved",
 INVENTORY_FAILED: "inventory.failed",
 PAYMENT_COMPLETED: "payment.completed",
+PAYMENT_FAILED: "payment.failed",
 
 ## phase 2: (todo later)

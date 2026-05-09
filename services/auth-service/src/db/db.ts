@@ -8,11 +8,16 @@ const pool = new pg.Pool({
 
 export const db = drizzle(pool);
 
-export async function checkDb() {
-    try {
-        const result = await db.execute(sql`SELECT 1`);
-        console.log('Database connected successfully!');
-    } catch (error) {
-        console.error('Database connection failed:', error);
+export async function checkDb(retries = 10) {
+    for (let i = 0; i < retries; i++) {
+        try {
+            await db.execute(sql`SELECT 1`);
+            console.log("DB connected");
+            return;
+        } catch (err) {
+            console.log("DB not ready, retrying...");
+            await new Promise(r => setTimeout(r, 2000));
+        }
     }
+    throw new Error("DB failed to connect");
 }

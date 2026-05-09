@@ -1,22 +1,208 @@
-
 services:
   kong:
+    image: kong:latest
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /usr/local/kong/declarative/kong.yml
+      KONG_PROXY_ACCESS_LOG: /dev/stdout
+      KONG_ADMIN_ACCESS_LOG: /dev/stdout
+      KONG_PROXY_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_LISTEN: 0.0.0.0:8001, 0.0.0.0:8444 ssl
+    volumes:
+      - ./kong/kong.yml:/usr/local/kong/declarative/kong.yml
+    ports:
+      - "8000:8000"
+      - "8001:8001"
+    depends_on:
+      - auth-service
+      - inventory-service
+      - order-service
+      # - payment-service
+
   rabbitmq:
     image: rabbitmq:3-management
-
     ports:
       - "5672:5672"
       - "15672:15672"
+    healthcheck:
+      test: [ "CMD", "rabbitmq-diagnostics", "ping" ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
 
-
-  
-
+  # DB services
   auth-db:
-  inventory-db:
-  order-db:
-  payment-db:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: root
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: auth
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U root -d auth" ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
+  inventory-db:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: root
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: inventory
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U root -d inventory" ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  order-db:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: root
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: order
+    ports:
+      - "5434:5432"
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U root -d order" ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+  
+  # payment-db:
+  #   image: postgres:15
+  #   environment:
+  #     POSTGRES_USER: root
+  #     POSTGRES_PASSWORD: password
+  #     POSTGRES_DB: payment
+  #   ports:
+  #     - "5435:5432" # to avoid port conflict other db
+  #   healthcheck:
+  #     test: [ "CMD-SHELL", "pg_isready -U root -d payment" ]
+  #     interval: 5s
+  #     timeout: 5s
+  #     retries: 10
+
+  # Application services
   auth-service:
+    build:
+      context: .
+      dockerfile: ./services/auth-service/Dockerfile
+    environment:
+      - DATABASE_URL=postgres://root:password@auth-db:5432/auth
+      - RABBITMQ_URL=amqp://rabbitmq:5672
+      - JWT_SECRET=super-secret-key-for-lab-only
+    ports:
+      - "3000:3000"
+    depends_on:
+      auth-db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
   inventory-service:
+    build:
+      context: .
+      dockerfile: ./services/inventory-service/Dockerfile
+    environment:
+      - DATABASE_URL=postgres://root:password@inventory-db:5432/inventory
+      - RABBITMQ_URL=amqp://rabbitmq:5672
+      - JWT_SECRET=super-secret-key-for-lab-only
+    ports:
+      - "3001:3000"
+    depends_on:
+      inventory-db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+  
   order-service:
-  payment-service:
+    build:
+      context: .
+      dockerfile: ./services/order-service/Dockerfile
+    environment:
+      - DATABASE_URL=postgres://root:password@order-db:5432/order
+      - RABBITMQ_URL=amqp://rabbitmq:5672
+      - JWT_SECRET=super-secret-key-for-lab-only
+    ports:
+      - "3002:3000"
+    depends_on:
+      order-db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  # payment-service:
+  #   build:
+  #     context: .
+  #     dockerfile: ./services/payment-service/Dockerfile
+  #   environment:
+  #     - DATABASE_URL=postgres://root:password@payment-db:5432/payment
+  #     - RABBITMQ_URL=amqp://rabbitmq:5672
+  #     - JWT_SECRET=super-secret-key-for-lab-only
+  #   ports:
+  #     - "3003:3000"
+  #   depends_on:
+  #     payment-db:
+  #       condition: service_healthy
+  #     rabbitmq:
+  #       condition: service_healthy
+
+  # Migration services
+  migrate-auth:
+    build:
+      context: .
+      dockerfile: ./services/auth-service/Dockerfile
+    environment:
+      - DATABASE_URL=postgres://root:password@auth-db:5432/auth
+      - RABBITMQ_URL=amqp://rabbitmq:5672
+      - JWT_SECRET=super-secret-key-for-lab-only
+    command: npx drizzle-kit push
+    depends_on:
+      auth-db:
+        condition: service_healthy
+
+  migrate-inventory:
+    build:
+      context: .
+      dockerfile: ./services/inventory-service/Dockerfile
+    environment:
+      - DATABASE_URL=postgres://root:password@inventory-db:5432/inventory
+      - RABBITMQ_URL=amqp://rabbitmq:5672
+      - JWT_SECRET=super-secret-key-for-lab-only
+    command: npx drizzle-kit push
+    depends_on:
+      inventory-db:
+        condition: service_healthy
+
+  migrate-order:
+    build:
+      context: .
+      dockerfile: ./services/order-service/Dockerfile
+    environment:
+      - DATABASE_URL=postgres://root:password@order-db:5432/order
+      - RABBITMQ_URL=amqp://rabbitmq:5672
+      - JWT_SECRET=super-secret-key-for-lab-only
+    command: npx drizzle-kit push
+    depends_on:
+      order-db:
+        condition: service_healthy
+
+  # migrate-payment:
+  #   build:
+  #     context: .
+  #     dockerfile: ./services/payment-service/Dockerfile
+  #   environment:
+  #     - DATABASE_URL=postgres://root:password@payment-db:5432/payment
+  #     - RABBITMQ_URL=amqp://rabbitmq:5672
+  #     - JWT_SECRET=super-secret-key-for-lab-only
+  #   command: npx drizzle-kit push
+  #   depends_on:
+  #     payment-db:
+  #       condition: service_healthy

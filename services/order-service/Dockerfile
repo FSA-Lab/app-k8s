@@ -6,13 +6,13 @@ WORKDIR /app
 COPY package.json ./
 
 # Copy packages
-COPY services/auth-service ./services/auth-service
+COPY services/order-service ./services/order-service
 COPY shared/packages ./shared/packages
 
 # Install dependencies for workspaces
 RUN npm install
 
-WORKDIR /app/services/auth-service
+WORKDIR /app/services/order-service
 
 EXPOSE 3000
 
