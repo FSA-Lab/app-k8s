@@ -1,11 +1,14 @@
 import express, { Request, Response } from "express";
+import amqp from "amqplib";
 
 import { db, checkDb } from "./db/db";
 import { orders, orderItems } from "./db/schema";
 import { eq } from "drizzle-orm";
 
-import { authMiddleware, adminMiddleware } from "@shared/auth";
+import { authMiddleware } from "@shared/auth";
+import { EVENTS } from "@shared/events";
 import { connectRabbitMQ } from "./rabbitmq/connection";
+import { publishEvent } from "./rabbitmq/publisher";
 
 async function bootstrap() {
     try {
@@ -18,126 +21,53 @@ async function bootstrap() {
 
 
         async function startOrderConsumer() {
-            const conn =
-                await amqp.connect(
-                    "amqp://rabbitmq-service"
-                );
+            const conn = await amqp.connect(process.env.RABBITMQ_URL!);
+            const consumerChannel = await conn.createChannel();
 
-            const channel =
-                await conn.createChannel();
+            await consumerChannel.assertExchange("app.events", "topic", { durable: true });
 
-            await channel.assertExchange(
-                "orders",
-                "topic",
-                {
-                    durable: true,
+            const q = await consumerChannel.assertQueue("order.status");
+
+            await consumerChannel.bindQueue(q.queue, "app.events", EVENTS.INVENTORY_RESERVED);
+            await consumerChannel.bindQueue(q.queue, "app.events", EVENTS.INVENTORY_FAILED);
+            await consumerChannel.bindQueue(q.queue, "app.events", EVENTS.PAYMENT_COMPLETED);
+            await consumerChannel.bindQueue(q.queue, "app.events", EVENTS.PAYMENT_FAILED);
+
+            consumerChannel.consume(q.queue, async (msg) => {
+                if (!msg) return;
+
+                const data = JSON.parse(msg.content.toString());
+                const routingKey = msg.fields.routingKey;
+
+                console.log(`[order-consumer] ${routingKey}`, data);
+
+                if (routingKey === EVENTS.INVENTORY_FAILED) {
+                    // Stock was never deducted, no compensation needed
+                    await db.update(orders).set({ status: "failed" }).where(eq(orders.id, data.orderId));
+                    console.log(`[order-consumer] order ${data.orderId} failed (inventory)`);
                 }
-            );
 
-            const q =
-                await channel.assertQueue(
-                    "order.status"
-                );
+                if (routingKey === EVENTS.PAYMENT_FAILED) {
+                    // Stock was deducted, need compensation rollback
+                    await db.update(orders).set({ status: "failed" }).where(eq(orders.id, data.orderId));
 
-            await channel.bindQueue(
-                q.queue,
-                "orders",
-                "inventory.reserved"
-            );
-
-            await channel.bindQueue(
-                q.queue,
-                "orders",
-                "inventory.failed"
-            );
-
-            await channel.bindQueue(
-                q.queue,
-                "orders",
-                "payment.success"
-            );
-
-            await channel.bindQueue(
-                q.queue,
-                "orders",
-                "payment.failed"
-            );
-
-            channel.consume(
-                q.queue,
-                async (msg) => {
-                    if (!msg) return;
-
-                    const data = JSON.parse(
-                        msg.content.toString()
-                    );
-
-                    console.log(data);
-
-                    /**
-                     * inventory failed
-                     */
-                    if (
-                        msg.fields.routingKey ===
-                        "inventory.failed"
-                    ) {
-                        await db
-                            .update(orders)
-                            .set({
-                                status: "failed",
-                            })
-                            .where(
-                                eq(
-                                    orders.id,
-                                    data.orderId
-                                )
-                            );
-                    }
-
-                    /**
-                     * payment failed
-                     */
-                    if (
-                        msg.fields.routingKey ===
-                        "payment.failed"
-                    ) {
-                        await db
-                            .update(orders)
-                            .set({
-                                status: "failed",
-                            })
-                            .where(
-                                eq(
-                                    orders.id,
-                                    data.orderId
-                                )
-                            );
-                    }
-
-                    /**
-                     * payment success
-                     * simplistic version
-                     */
-                    if (
-                        msg.fields.routingKey ===
-                        "payment.success"
-                    ) {
-                        await db
-                            .update(orders)
-                            .set({
-                                status: "done",
-                            })
-                            .where(
-                                eq(
-                                    orders.id,
-                                    data.orderId
-                                )
-                            );
-                    }
-
-                    channel.ack(msg);
+                    const orderItemsList = await db.select().from(orderItems).where(eq(orderItems.order_id, data.orderId));
+                    await publishEvent(EVENTS.ORDER_FAILED, {
+                        orderId: data.orderId,
+                        userId: data.userId,
+                        items: orderItemsList.map(i => ({ item_id: i.item_id, quantity: i.quantity })),
+                    });
+                    console.log(`[order-consumer] order ${data.orderId} failed (payment) — stock rollback published`);
                 }
-            );
+
+                if (routingKey === EVENTS.PAYMENT_COMPLETED) {
+                    await db.update(orders).set({ status: "done" }).where(eq(orders.id, data.orderId));
+                }
+
+                consumerChannel.ack(msg);
+            });
+
+            console.log("order-consumer started");
         }
 
         startOrderConsumer();
@@ -289,12 +219,14 @@ async function bootstrap() {
                      * publish saga event
                      */
                     const event = {
-                        event: "order.created",
+                        event: EVENTS.ORDER_CREATED,
                         orderId,
                         userId,
                         totalPrice,
                         items,
                     };
+
+                    await publishEvent(EVENTS.ORDER_CREATED, event);
 
 
                     return res.status(201).json({

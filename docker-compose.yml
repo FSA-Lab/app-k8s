@@ -18,7 +18,7 @@ services:
       - auth-service
       - inventory-service
       - order-service
-      # - payment-service
+      - payment-service
 
   rabbitmq:
     image: rabbitmq:3-management
@@ -75,19 +75,19 @@ services:
       timeout: 5s
       retries: 10
   
-  # payment-db:
-  #   image: postgres:15
-  #   environment:
-  #     POSTGRES_USER: root
-  #     POSTGRES_PASSWORD: password
-  #     POSTGRES_DB: payment
-  #   ports:
-  #     - "5435:5432" # to avoid port conflict other db
-  #   healthcheck:
-  #     test: [ "CMD-SHELL", "pg_isready -U root -d payment" ]
-  #     interval: 5s
-  #     timeout: 5s
-  #     retries: 10
+  payment-db:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: root
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: payment
+    ports:
+      - "5435:5432" # to avoid port conflict other db
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U root -d payment" ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   # Application services
   auth-service:
@@ -138,21 +138,22 @@ services:
       rabbitmq:
         condition: service_healthy
 
-  # payment-service:
-  #   build:
-  #     context: .
-  #     dockerfile: ./services/payment-service/Dockerfile
-  #   environment:
-  #     - DATABASE_URL=postgres://root:password@payment-db:5432/payment
-  #     - RABBITMQ_URL=amqp://rabbitmq:5672
-  #     - JWT_SECRET=super-secret-key-for-lab-only
-  #   ports:
-  #     - "3003:3000"
-  #   depends_on:
-  #     payment-db:
-  #       condition: service_healthy
-  #     rabbitmq:
-  #       condition: service_healthy
+  payment-service:
+    build:
+      context: .
+      dockerfile: ./services/payment-service/Dockerfile
+    environment:
+      - DATABASE_URL=postgres://root:password@payment-db:5432/payment
+      - RABBITMQ_URL=amqp://rabbitmq:5672
+      - JWT_SECRET=super-secret-key-for-lab-only
+      - AUTH_SERVICE_URL=http://auth-service:3000
+    ports:
+      - "3003:3000"
+    depends_on:
+      payment-db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
 
   # Migration services
   migrate-auth:
@@ -194,15 +195,15 @@ services:
       order-db:
         condition: service_healthy
 
-  # migrate-payment:
-  #   build:
-  #     context: .
-  #     dockerfile: ./services/payment-service/Dockerfile
-  #   environment:
-  #     - DATABASE_URL=postgres://root:password@payment-db:5432/payment
-  #     - RABBITMQ_URL=amqp://rabbitmq:5672
-  #     - JWT_SECRET=super-secret-key-for-lab-only
-  #   command: npx drizzle-kit push
-  #   depends_on:
-  #     payment-db:
-  #       condition: service_healthy
+  migrate-payment:
+    build:
+      context: .
+      dockerfile: ./services/payment-service/Dockerfile
+    environment:
+      - DATABASE_URL=postgres://root:password@payment-db:5432/payment
+      - RABBITMQ_URL=amqp://rabbitmq:5672
+      - JWT_SECRET=super-secret-key-for-lab-only
+    command: npx drizzle-kit push
+    depends_on:
+      payment-db:
+        condition: service_healthy

@@ -21,4 +21,11 @@ services:
         paths:
           - /orders
         strip_path: false
+  - name: payment-service
+    url: http://payment-service:3000
+    routes:
+      - name: payment-route
+        paths:
+          - /payments
+        strip_path: false
 

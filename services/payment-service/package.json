@@ -4,7 +4,6 @@
     "@shared/events": "^1.0.0",
     "@types/pg": "^8.20.0",
     "amqplib": "^1.0.7",
-    "bcrypt": "^6.0.0",
     "dotenv": "^17.4.2",
     "drizzle-kit": "^0.31.10",
     "drizzle-orm": "^0.45.2",
@@ -12,7 +11,7 @@
     "pg": "^8.20.0",
     "tsx": "^4.21.0"
   },
-  "name": "order-service",
+  "name": "payment-service",
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
@@ -22,8 +21,5 @@
   },
   "keywords": [],
   "author": "",
-  "license": "ISC",
-  "devDependencies": {
-    "@types/bcrypt": "^6.0.0"
-  }
+  "license": "ISC"
 }

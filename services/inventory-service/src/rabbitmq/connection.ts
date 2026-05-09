@@ -6,6 +6,8 @@ export async function connectRabbitMQ(retries = 10) {
     for (let i = 0; i < retries; i++) {
         try {
             const conn = await amqp.connect(process.env.RABBITMQ_URL!);
+            channel = await conn.createChannel();
+            await channel.assertExchange("app.events", "topic", { durable: true });
             console.log("RabbitMQ connected");
             return conn;
         } catch (err) {

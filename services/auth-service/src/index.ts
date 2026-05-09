@@ -86,6 +86,11 @@ async function bootstrap() {
             }
         });
 
+        // POST /logout
+        app.post("/logout", (_req: Request, res: Response) => {
+            return res.json({ message: "Logged out successfully" });
+        });
+
         // GET /me
         app.get("/me", authMiddleware, async (req: Request, res: Response) => {
             try {
@@ -142,6 +147,44 @@ async function bootstrap() {
                     email: newUser.email,
                     role: newUser.role
                 });
+            } catch (err) {
+                console.error(err);
+                return res.status(500).json({ message: "Internal server error" });
+            }
+        });
+
+        // GET /users/:id (internal)
+        app.get("/users/:id", async (req: Request, res: Response) => {
+            try {
+                const id = Number(req.params.id);
+                const result = await db.select().from(users).where(eq(users.id, id));
+                if (result.length === 0) {
+                    return res.status(404).json({ message: "User not found" });
+                }
+                const user = result[0];
+                return res.json({ id: user.id, name: user.name, email: user.email, coin: user.coin, role: user.role });
+            } catch (err) {
+                console.error(err);
+                return res.status(500).json({ message: "Internal server error" });
+            }
+        });
+
+        // PATCH /users/:id/coins (internal - for payment-service)
+        app.patch("/users/:id/coins", async (req: Request, res: Response) => {
+            try {
+                const id = Number(req.params.id);
+                const { coin } = req.body;
+
+                if (coin === undefined || coin === null) {
+                    return res.status(400).json({ message: "coin is required" });
+                }
+
+                const [updated] = await db.update(users).set({ coin }).where(eq(users.id, id)).returning();
+                if (!updated) {
+                    return res.status(404).json({ message: "User not found" });
+                }
+
+                return res.json({ id: updated.id, coin: updated.coin });
             } catch (err) {
                 console.error(err);
                 return res.status(500).json({ message: "Internal server error" });
