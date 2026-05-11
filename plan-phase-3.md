@@ -135,7 +135,7 @@ pipeline {
     environment {
         DOCKERHUB_CREDENTIALS = credentials('dockerhub-creds')
         DOCKERHUB_REPO        = 'yourdockerhubusername'
-        MANIFEST_REPO_URL     = 'https://github.com/you/app-k8s-manifests.git'
+        MANIFEST_REPO_URL     = 'https://github.com/FSA-Lab/app-k8s-manifests.git'
         MANIFEST_REPO_CREDS   = credentials('manifest-repo-creds')
         SONAR_TOKEN           = credentials('sonar-token')
     }
@@ -200,7 +200,7 @@ pipeline {
                         def overlay = env.BRANCH_NAME == 'main' ? 'prod' : 'staging'
 
                         // Clone manifest repo
-                        sh "git clone https://${MANIFEST_REPO_CREDS_PSW}@github.com/you/app-k8s-manifests.git manifests"
+                        sh "git clone https://${MANIFEST_REPO_CREDS_PSW}@github.com/FSA-Lab/app-k8s-manifests.git manifests"
                         dir('manifests') {
                             sh "git checkout ${env.BRANCH_NAME}"
 
@@ -491,7 +491,7 @@ In ArgoCD UI (or CLI):
 
 ```bash
 # Add the manifest repo
-argocd repo add https://github.com/you/app-k8s-manifests.git \
+argocd repo add https://github.com/FSA-Lab/app-k8s-manifests.git \
   --username <github-username> \
   --password <github-pat>
 ```
@@ -540,7 +540,7 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/you/app-k8s-manifests.git
+    repoURL: https://github.com/FSA-Lab/app-k8s-manifests.git
     targetRevision: develop
     path: k8s/overlays/staging
   destination:
@@ -565,7 +565,7 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/you/app-k8s-manifests.git
+    repoURL: https://github.com/FSA-Lab/app-k8s-manifests.git
     targetRevision: main
     path: k8s/overlays/prod
   destination:

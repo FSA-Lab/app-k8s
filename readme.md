@@ -244,32 +244,56 @@ docker-compose up --build
 
 Then open Grafana at http://localhost:3004 and explore the "Microservices" dashboard.
 
-## Phase 3: k8s and cicd deployment
+## Phase 3: Kubernetes CI/CD (Azure AKS + Jenkins + ArgoCD)
 
-Deploy the app to Kubernetes with a Jenkins CI/CD pipeline.
+Deploy the microservices to Azure AKS using a two-repo GitOps workflow.
 
-### What's Covered
+### Architecture
 
-**Kubernetes Manifests**
-- Deployments, Services, ConfigMaps, Secrets for all 4 services + infrastructure (PostgreSQL, RabbitMQ, Kong, OTel stack)
-- Liveness and readiness probes for all services
-- Resource limits (CPU/memory) per service
+```
+app-k8s (this repo)                app-k8s-manifests (separate repo)
+┌──────────────────────┐          ┌──────────────────────────┐
+│ services/            │          │ k8s/base/                │
+│ shared/              │          │ k8s/overlays/staging/    │
+│ Jenkinsfile          │          │ k8s/overlays/prod/       │
+│ docker-compose.yml   │          │ argocd/                  │
+└─────────┬────────────┘          └────────────┬─────────────┘
+          │                                    ▲
+          │ Jenkins builds                     │ ArgoCD syncs
+          │ & pushes images                    │ to K8s
+          ▼                                    │
+    ┌───────────┐   push images   ┌────────────┘
+    │  Jenkins   │───────────────→│ DockerHub
+    │            │  update tags   │
+    │            │───────────────→ manifest repo
+    └───────────┘
+```
 
-**Configuration & Secrets**
-- Kubernetes Secrets for sensitive values: DB passwords, JWT secret, RabbitMQ credentials
-- ConfigMaps for non-sensitive config: database names, OTel endpoints, Prometheus scrape targets
-- Per-environment overrides (dev/staging/prod)
+### Branch Strategy
 
-**Helm Charts or Kustomize**
-- Parameterized templates for environment-specific configuration
-- Separate namespaces per environment (dev, staging, prod)
+| Branch | Jenkins | ArgoCD | Target |
+|---|---|---|---|
+| `develop` | Builds + pushes images | Auto-sync | staging namespace |
+| `main` | Builds + pushes images | Manual sync | prod namespace |
 
-**Jenkins CI/CD Pipeline**
-- Stages: checkout → install deps → lint → build Docker images → push to registry → deploy to k8s → run smoke tests
-- Branch-based deployment (main → prod, develop → staging)
+### What's in This Repo
 
-**Docker Registry**
-- Push built images to a registry (DockerHub, ECR, or local)
+- `Jenkinsfile` — CI pipeline (checkout → build → push → update manifests)
+- `jenkins/pod-template.yaml` — ephemeral build agent (node + docker + kustomize)
+- `plan-phase-3.md` — full implementation plan and configuration guide
 
-**Ingress**
-- Kubernetes Ingress or Kong as ingress controller for external access
+### What's in the Manifest Repo
+
+- `k8s/base/` — Kustomize base (4 services, 4 DBs, Kong, RabbitMQ, OTel, Jaeger, Prometheus, Grafana, migration jobs)
+- `k8s/overlays/staging/` and `prod/` — environment-specific image tags and namespaces
+- `argocd/` — ArgoCD Application manifests
+
+### Configuration
+
+See `plan-phase-3.md` for:
+- GitHub access tokens (Jenkins + ArgoCD)
+- DockerHub setup
+- K8s Secrets creation (`kubectl create secret`)
+- Jenkins credentials
+- ArgoCD repo configuration
+- Branch protection rules
