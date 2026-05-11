@@ -10,21 +10,21 @@
     "drizzle-kit": "^0.31.10",
     "drizzle-orm": "^0.45.2",
     "express": "^5.2.1",
-    "pg": "^8.20.0",
-    "tsx": "^4.21.0"
+    "pg": "^8.20.0"
   },
   "name": "inventory-service",
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
   "scripts": {
-    "start": "tsx src/index.ts",
+    "start": "node dist/bundle.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "devDependencies": {
-    "@types/bcrypt": "^6.0.0"
+    "@types/bcrypt": "^6.0.0",
+    "tsx": "^4.21.0"
   }
 }
