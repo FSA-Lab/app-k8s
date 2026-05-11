@@ -30,8 +30,8 @@ Deploy the microservice app to Azure AKS with Jenkins CI and ArgoCD CD using two
 app-k8s (this repo)              manifest repo (separate)
 ┌─────────────────────┐          ┌─────────────────────────┐
 │ services/           │          │ k8s/                    │
-│ shared/             │          │   base/                 │
-│ Dockerfile          │          │   overlays/staging/     │
+│   └── */Dockerfile  │          │   base/                 │
+│ shared/             │          │   overlays/staging/     │
 │ Jenkinsfile         │          │   overlays/prod/        │
 │ docker-compose.yml  │          │ argocd/                 │
 └────────┬────────────┘          └────────────┬────────────┘
@@ -163,7 +163,7 @@ See `jenkins/pod-template.yaml` in this repo. Three containers:
 
 ### Dockerfile fixes
 
-Add `COPY package-lock.json* ./` to auth-service and inventory-service Dockerfiles (payment and order already have it).
+`COPY package-lock.json* ./` added to all four service Dockerfiles (auth, inventory, order, payment).
 
 ---
 
@@ -381,7 +381,7 @@ In Jenkins UI → Manage Jenkins → Credentials → Add:
 | `dockerhub-creds` | Username/Password | DockerHub username + password/token |
 | `manifest-repo-creds` | Secret text | GitHub PAT for manifest repo |
 | `sonar-token` | Secret text | SonarQube token |
-| `app-repo-creds` | Username/Password | GitHub PAT (for cloning app repo) |
+| `app-repo-creds` | Username/Password | GitHub PAT (for cloning app repo — configured in Jenkins pipeline job SCM settings, not in Jenkinsfile) |
 
 ### Step 3: Configure GitHub Webhook for Jenkins
 
@@ -544,7 +544,7 @@ spec:
 - Apply staging and prod Application manifests
 
 **A6. Deploy SonarQube to AKS**
-- In `jenkins` or `sonarqube` namespace
+- In `argocd` namespace (same as ArgoCD for simplicity; the Jenkinsfile references `sonarqube-service.argocd.svc.cluster.local:9000`)
 - Create project `app-k8s`
 - Generate token, add to Jenkins credentials
 

@@ -10,7 +10,7 @@ The app is microservice app that has these services:
 each has its own db and all is drizzle with js node. the app run in k8s microservice. lets assume i have frontend static page that call api to k8s kong gateway 
 
 ## Phase 1:
-docker compose locally
+docker compose locally (see `plan-phase-1.md` for implementation details)
 
 ### Data schema:
 **(inventory-service)**
@@ -60,6 +60,7 @@ user:
 
 ### Folder structure:
 
+```
 /kong (gateway routing config)
 /services
     /auth-service (user auth, internal endpoints)
@@ -70,6 +71,7 @@ user:
     /auth (JWT, middleware)
     /events (saga event constants + types)
     /tracing (OpenTelemetry, Prometheus metrics, pino logger)
+```
 
 ### Routes
 
@@ -126,18 +128,20 @@ GET /payments (require auth)
 POST /payments (require auth)
 - manual payment (for testing)
 
-**rabbitmq event**
+**Rabbitmq event**
 
+```
 ORDER_CREATED: "order.created"
 ORDER_FAILED: "order.failed" (compensation — triggers stock rollback)
 INVENTORY_RESERVED: "inventory.reserved"
 INVENTORY_FAILED: "inventory.failed"
 PAYMENT_COMPLETED: "payment.completed"
 PAYMENT_FAILED: "payment.failed"
+```
 
 ## Phase 2: Observability (OpenTelemetry + Prometheus + Grafana)
 
-Add distributed tracing, metrics collection, and dashboards to all 4 services.
+Add distributed tracing, metrics collection, and dashboards to all 4 services (see `plan-phase-2.md` for implementation details).
 
 ### Architecture
 
@@ -243,6 +247,13 @@ docker-compose up --build
 ```
 
 Then open Grafana at http://localhost:3004 and explore the "Microservices" dashboard.
+
+### Testing
+
+- `test.md` — API reference, saga flow diagram, and test case definitions
+- `test/windows/` — PowerShell automated test scripts (run `run-all.ps1`)
+- `test/linux/` — Bash automated test scripts (run `run-all.sh`)
+- `.example.env` — example environment variables for auth-service (for local docker-compose usage)
 
 ## Phase 3: Kubernetes CI/CD (Azure AKS + Jenkins + ArgoCD)
 
