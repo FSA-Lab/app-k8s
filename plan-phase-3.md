@@ -4,6 +4,24 @@
 
 Deploy the microservice app to Azure AKS with Jenkins CI and ArgoCD CD using two repos.
 
+### Status
+
+| Phase | Description | Status |
+|---|---|---|
+| A1 | Create manifest repo + branches | DONE |
+| A2 | GitHub PATs | MANUAL |
+| A3 | DockerHub account + token | MANUAL |
+| A4 | Deploy Jenkins to AKS | MANUAL |
+| A5 | Deploy ArgoCD to AKS | MANUAL |
+| A6 | Deploy SonarQube to AKS | MANUAL |
+| B | Kustomize manifests (base + overlays + patches) | DONE |
+| C | App repo changes (Dockerfiles, Jenkinsfile, pod template, branches) | DONE |
+| D | Infrastructure deployment (secrets, namespaces, infra resources) | MANUAL |
+| E | End-to-end test | MANUAL |
+
+**What's done:** All code and configuration. Both repos have `main` and `develop` branches pushed.
+**What's left:** Manual setup — credentials, infrastructure deployment, ArgoCD configuration.
+
 ---
 
 ## Two-Repo Architecture
@@ -126,135 +144,22 @@ app-k8s/
     └── pod-template.yaml          # Ephemeral build agent pod spec
 ```
 
-### Jenkinsfile
+### Jenkinsfile (actual implementation)
 
-```groovy
-pipeline {
-    agent { kubernetes { yamlFile 'jenkins/pod-template.yaml' } }
-
-    environment {
-        DOCKERHUB_CREDENTIALS = credentials('dockerhub-creds')
-        DOCKERHUB_REPO        = 'yourdockerhubusername'
-        MANIFEST_REPO_URL     = 'https://github.com/FSA-Lab/app-k8s-manifests.git'
-        MANIFEST_REPO_CREDS   = credentials('manifest-repo-creds')
-        SONAR_TOKEN           = credentials('sonar-token')
-    }
-
-    stages {
-        stage('Checkout') {
-            steps { checkout scm }
-        }
-
-        stage('Install') {
-            steps {
-                container('node') { sh 'npm install' }
-            }
-        }
-
-        stage('SonarQube Analysis') {
-            steps {
-                container('node') {
-                    withSonarQubeEnv('sonarqube') {
-                        sh '''
-                            npx sonar-scanner \
-                              -Dsonar.projectKey=app-k8s \
-                              -Dsonar.sources=services,shared \
-                              -Dsonar.host.url=http://sonarqube-service.argocd.svc.cluster.local:9000
-                        '''
-                    }
-                }
-            }
-        }
-
-        stage('Quality Gate') {
-            steps {
-                timeout(time: 2, unit: 'MINUTES') {
-                    waitForQualityGate abortPipeline: true
-                }
-            }
-        }
-
-        stage('Build & Push Images') {
-            steps {
-                container('docker') {
-                    script {
-                        def services = ['auth-service', 'inventory-service', 'order-service', 'payment-service']
-                        def shortSha = env.GIT_COMMIT.take(7)
-
-                        sh 'echo $DOCKERHUB_CREDENTIALS_PSW | docker login -u $DOCKERHUB_CREDENTIALS_USR --password-stdin'
-
-                        for (svc in services) {
-                            sh "docker build -t ${DOCKERHUB_REPO}/${svc}:${shortSha} -f services/${svc}/Dockerfile ."
-                            sh "docker push ${DOCKERHUB_REPO}/${svc}:${shortSha}"
-                        }
-                    }
-                }
-            }
-        }
-
-        stage('Update Manifest Repo') {
-            steps {
-                container('kustomize') {
-                    script {
-                        def shortSha = env.GIT_COMMIT.take(7)
-                        def overlay = env.BRANCH_NAME == 'main' ? 'prod' : 'staging'
-
-                        // Clone manifest repo
-                        sh "git clone https://${MANIFEST_REPO_CREDS_PSW}@github.com/FSA-Lab/app-k8s-manifests.git manifests"
-                        dir('manifests') {
-                            sh "git checkout ${env.BRANCH_NAME}"
-
-                            // Update image tags
-                            dir("k8s/overlays/${overlay}") {
-                                sh "kustomize edit set image auth-service=${DOCKERHUB_REPO}/auth-service:${shortSha}"
-                                sh "kustomize edit set image inventory-service=${DOCKERHUB_REPO}/inventory-service:${shortSha}"
-                                sh "kustomize edit set image order-service=${DOCKERHUB_REPO}/order-service:${shortSha}"
-                                sh "kustomize edit set image payment-service=${DOCKERHUB_REPO}/payment-service:${shortSha}"
-                            }
-
-                            // Commit and push
-                            sh 'git config user.email "jenkins@ci.local"'
-                            sh 'git config user.name "Jenkins CI"'
-                            sh 'git add k8s/overlays/'
-                            sh "git commit -m 'ci: update image tags to ${shortSha}'"
-                            sh "git push origin ${env.BRANCH_NAME}"
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-```
+See `Jenkinsfile` in this repo. Key features:
+- **Init stage** — detects which services changed, sets `BUILD_*` flags for conditional builds
+- **Install** — `npm ci` (clean install, respects lockfile)
+- **SonarQube** — via `npx sonar-scanner` in node container
+- **Docker Build & Push** — parallel per-service, conditional on `BUILD_*` flags, pushes to DockerHub with git SHORT_SHA tag
+- **Update Manifest Repo** — clones manifest repo, runs `kustomize edit set image` per service, commits and pushes
+- **Post block** — failure logging + docker image cleanup
 
 ### Jenkins pod template (jenkins/pod-template.yaml)
 
-```yaml
-apiVersion: v1
-kind: Pod
-metadata:
-  labels:
-    jenkins: agent
-spec:
-  containers:
-    - name: node
-      image: node:24-slim
-      command: ['sleep', 'infinity']
-    - name: docker
-      image: docker:24-dind
-      securityContext:
-        privileged: true
-      volumeMounts:
-        - name: docker-socket
-          mountPath: /var/run/docker.sock
-    - name: kustomize
-      image: kustomize/kustomize:latest
-      command: ['sleep', 'infinity']
-  volumes:
-    - name: docker-socket
-      hostPath:
-        path: /var/run/docker.sock
-```
+See `jenkins/pod-template.yaml` in this repo. Three containers:
+- **node** (node:24-slim) — install deps, run sonar-scanner
+- **docker** (docker:24-dind) — build and push images, privileged with host docker socket
+- **kustomize** (kustomize/kustomize:latest) — update image tags in manifest repo
 
 ### Dockerfile fixes
 
@@ -340,9 +245,15 @@ app-k8s-manifests/
 │   │
 │   └── overlays/
 │       ├── staging/
-│       │   └── kustomization.yaml
+│       │   ├── kustomization.yaml
+│       │   ├── kong-patch.yaml           # Kong URLs → staging.svc.cluster.local
+│       │   ├── prometheus-patch.yaml     # Prometheus scrape targets → staging
+│       │   └── payment-service-patch.yaml # AUTH_SERVICE_URL → staging
 │       └── prod/
-│           └── kustomization.yaml
+│           ├── kustomization.yaml
+│           ├── kong-patch.yaml           # Kong URLs → prod.svc.cluster.local
+│           ├── prometheus-patch.yaml     # Prometheus scrape targets → prod
+│           └── payment-service-patch.yaml # AUTH_SERVICE_URL → prod
 │
 └── argocd/
     ├── staging-app.yaml
@@ -610,10 +521,9 @@ spec:
 
 ### Phase A: Setup (manual, one-time)
 
-**A1. Create manifest repo**
-- Create `app-k8s-manifests` on GitHub
-- Create `develop` and `main` branches
-- Clone locally
+**A1. Create manifest repo** — DONE
+- `FSA-Lab/app-k8s-manifests` created on GitHub
+- `develop` and `main` branches pushed
 
 **A2. Create GitHub PATs**
 - Jenkins PAT: read/write to both repos
@@ -638,7 +548,9 @@ spec:
 - Create project `app-k8s`
 - Generate token, add to Jenkins credentials
 
-### Phase B: Kustomize Manifests (in manifest repo)
+### Phase B: Kustomize Manifests (in manifest repo) — DONE
+
+All manifests created and validated. Includes cross-namespace patches for Kong, Prometheus, and payment-service configmaps.
 
 **B1. Create Kustomize base — App services**
 
@@ -748,20 +660,12 @@ kustomize build k8s/overlays/staging
 kustomize build k8s/overlays/prod
 ```
 
-### Phase C: App Repo Changes (in app-k8s)
+### Phase C: App Repo Changes (in app-k8s) — DONE
 
-**C1. Fix Dockerfiles**
-- Add `COPY package-lock.json* ./` to auth-service and inventory-service Dockerfiles
-
-**C2. Create Jenkinsfile**
-- Pipeline stages as described above
-- Reference jenkins/pod-template.yaml
-
-**C3. Create jenkins/pod-template.yaml**
-- node:24-slim, docker:24-dind, kustomize containers
-
-**C4. Create develop branch**
-- `git checkout -b develop && git push -u origin develop`
+- C1. Dockerfiles fixed (COPY package-lock.json* added)
+- C2. Jenkinsfile created with conditional builds + GitOps manifest update
+- C3. jenkins/pod-template.yaml created
+- C4. `develop` branch created and pushed
 
 ### Phase D: Infrastructure Deployment (manual, one-time)
 
