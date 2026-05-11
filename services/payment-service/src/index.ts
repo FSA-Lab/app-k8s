@@ -1,6 +1,7 @@
 import "@shared/tracing";
 import express, { Request, Response } from "express";
 import amqp from "amqplib";
+import { propagation, context } from "@opentelemetry/api";
 
 import { db, checkDb } from "./db/db";
 import { payments } from "./db/schema";
@@ -34,53 +35,60 @@ async function bootstrap() {
             consumerChannel.consume(q.queue, async (msg) => {
                 if (!msg) return;
 
-                const data = JSON.parse(msg.content.toString());
-                logger.info({ orderId: data.orderId }, "inventory.reserved received");
+                const extractedContext = propagation.extract(
+                    context.active(),
+                    msg.properties?.headers ?? {}
+                );
 
-                try {
-                    const userRes = await fetch(`${AUTH_SERVICE_URL}/users/${data.userId}`);
-                    if (!userRes.ok) {
-                        throw new Error("Failed to fetch user");
-                    }
-                    const user = await userRes.json() as { id: number; coin: number };
+                context.with(extractedContext, async () => {
+                    const data = JSON.parse(msg.content.toString());
+                    logger.info({ orderId: data.orderId }, "inventory.reserved received");
 
-                    const totalPrice = data.totalPrice;
-
-                    if (user.coin >= totalPrice) {
-                        const deductRes = await fetch(`${AUTH_SERVICE_URL}/users/${data.userId}/coins`, {
-                            method: "PATCH",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({ coin: user.coin - totalPrice }),
-                        });
-
-                        if (!deductRes.ok) {
-                            throw new Error("Failed to deduct coins");
+                    try {
+                        const userRes = await fetch(`${AUTH_SERVICE_URL}/users/${data.userId}`);
+                        if (!userRes.ok) {
+                            throw new Error("Failed to fetch user");
                         }
+                        const user = await userRes.json() as { id: number; coin: number };
 
-                        await db.insert(payments).values({
-                            order_id: data.orderId,
-                            price: totalPrice,
-                            status: "paid",
-                        });
+                        const totalPrice = data.totalPrice;
 
-                        await publishEvent(EVENTS.PAYMENT_COMPLETED, { orderId: data.orderId, userId: data.userId });
-                        logger.info({ orderId: data.orderId }, "payment.completed");
-                    } else {
-                        await db.insert(payments).values({
-                            order_id: data.orderId,
-                            price: totalPrice,
-                            status: "failed",
-                        });
+                        if (user.coin >= totalPrice) {
+                            const deductRes = await fetch(`${AUTH_SERVICE_URL}/users/${data.userId}/coins`, {
+                                method: "PATCH",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({ coin: user.coin - totalPrice }),
+                            });
 
-                        await publishEvent(EVENTS.PAYMENT_FAILED, { orderId: data.orderId, userId: data.userId, reason: "insufficient coins" });
-                        logger.warn({ orderId: data.orderId }, "payment.failed — insufficient coins");
+                            if (!deductRes.ok) {
+                                throw new Error("Failed to deduct coins");
+                            }
+
+                            await db.insert(payments).values({
+                                order_id: data.orderId,
+                                price: totalPrice,
+                                status: "paid",
+                            });
+
+                            await publishEvent(EVENTS.PAYMENT_COMPLETED, { orderId: data.orderId, userId: data.userId });
+                            logger.info({ orderId: data.orderId }, "payment.completed");
+                        } else {
+                            await db.insert(payments).values({
+                                order_id: data.orderId,
+                                price: totalPrice,
+                                status: "failed",
+                            });
+
+                            await publishEvent(EVENTS.PAYMENT_FAILED, { orderId: data.orderId, userId: data.userId, reason: "insufficient coins" });
+                            logger.warn({ orderId: data.orderId }, "payment.failed — insufficient coins");
+                        }
+                    } catch (err) {
+                        logger.error(err, "error processing payment");
+                        await publishEvent(EVENTS.PAYMENT_FAILED, { orderId: data.orderId, userId: data.userId, reason: "payment processing error" });
                     }
-                } catch (err) {
-                    logger.error(err, "error processing payment");
-                    await publishEvent(EVENTS.PAYMENT_FAILED, { orderId: data.orderId, userId: data.userId, reason: "payment processing error" });
-                }
 
-                consumerChannel.ack(msg);
+                    consumerChannel.ack(msg);
+                });
             });
 
             logger.info("payment-consumer started");

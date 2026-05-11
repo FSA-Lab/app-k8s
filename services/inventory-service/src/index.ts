@@ -1,6 +1,7 @@
 import "@shared/tracing";
 import express, { Request, Response } from "express";
 import amqp from "amqplib";
+import { propagation, context } from "@opentelemetry/api";
 
 import { db, checkDb } from "./db/db";
 import { items } from "./db/schema";
@@ -35,55 +36,62 @@ async function bootstrap() {
             consumerChannel.consume(q.queue, async (msg) => {
                 if (!msg) return;
 
-                const data = JSON.parse(msg.content.toString());
-                const routingKey = msg.fields.routingKey;
-                logger.info({ routingKey, orderId: data.orderId }, "event received");
+                const extractedContext = propagation.extract(
+                    context.active(),
+                    msg.properties?.headers ?? {}
+                );
 
-                try {
-                    if (routingKey === EVENTS.ORDER_CREATED) {
-                        const itemIds = data.items.map((i: any) => i.item_id);
-                        const dbItems = await db.select().from(items).where(inArray(items.id, itemIds));
+                context.with(extractedContext, async () => {
+                    const data = JSON.parse(msg.content.toString());
+                    const routingKey = msg.fields.routingKey;
+                    logger.info({ routingKey, orderId: data.orderId }, "event received");
 
-                        let hasStock = true;
-                        for (const orderItem of data.items) {
-                            const dbItem = dbItems.find((d) => d.id === orderItem.item_id);
-                            if (!dbItem || dbItem.stock < orderItem.quantity) {
-                                hasStock = false;
-                                break;
-                            }
-                        }
+                    try {
+                        if (routingKey === EVENTS.ORDER_CREATED) {
+                            const itemIds = data.items.map((i: any) => i.item_id);
+                            const dbItems = await db.select().from(items).where(inArray(items.id, itemIds));
 
-                        if (hasStock) {
+                            let hasStock = true;
                             for (const orderItem of data.items) {
-                                const dbItem = dbItems.find((d) => d.id === orderItem.item_id)!;
-                                await db.update(items).set({ stock: dbItem.stock - orderItem.quantity }).where(eq(items.id, orderItem.item_id));
+                                const dbItem = dbItems.find((d) => d.id === orderItem.item_id);
+                                if (!dbItem || dbItem.stock < orderItem.quantity) {
+                                    hasStock = false;
+                                    break;
+                                }
                             }
-                            await publishEvent(EVENTS.INVENTORY_RESERVED, { orderId: data.orderId, userId: data.userId, totalPrice: data.totalPrice });
-                            logger.info({ orderId: data.orderId }, "inventory.reserved");
-                        } else {
-                            await publishEvent(EVENTS.INVENTORY_FAILED, { orderId: data.orderId, userId: data.userId, totalPrice: data.totalPrice, reason: "insufficient stock" });
-                            logger.warn({ orderId: data.orderId }, "inventory.failed — insufficient stock");
-                        }
-                    }
 
-                    // Compensation: restore stock on order failure
-                    if (routingKey === EVENTS.ORDER_FAILED) {
-                        const itemIds = data.items.map((i: any) => i.item_id);
-                        const dbItems = await db.select().from(items).where(inArray(items.id, itemIds));
-
-                        for (const orderItem of data.items) {
-                            const dbItem = dbItems.find((d) => d.id === orderItem.item_id);
-                            if (dbItem) {
-                                await db.update(items).set({ stock: dbItem.stock + orderItem.quantity }).where(eq(items.id, orderItem.item_id));
+                            if (hasStock) {
+                                for (const orderItem of data.items) {
+                                    const dbItem = dbItems.find((d) => d.id === orderItem.item_id)!;
+                                    await db.update(items).set({ stock: dbItem.stock - orderItem.quantity }).where(eq(items.id, orderItem.item_id));
+                                }
+                                await publishEvent(EVENTS.INVENTORY_RESERVED, { orderId: data.orderId, userId: data.userId, totalPrice: data.totalPrice });
+                                logger.info({ orderId: data.orderId }, "inventory.reserved");
+                            } else {
+                                await publishEvent(EVENTS.INVENTORY_FAILED, { orderId: data.orderId, userId: data.userId, totalPrice: data.totalPrice, reason: "insufficient stock" });
+                                logger.warn({ orderId: data.orderId }, "inventory.failed — insufficient stock");
                             }
                         }
-                        logger.info({ orderId: data.orderId }, "stock restored for failed order");
-                    }
-                } catch (err) {
-                    logger.error(err, "error processing event");
-                }
 
-                consumerChannel.ack(msg);
+                        // Compensation: restore stock on order failure
+                        if (routingKey === EVENTS.ORDER_FAILED) {
+                            const itemIds = data.items.map((i: any) => i.item_id);
+                            const dbItems = await db.select().from(items).where(inArray(items.id, itemIds));
+
+                            for (const orderItem of data.items) {
+                                const dbItem = dbItems.find((d) => d.id === orderItem.item_id);
+                                if (dbItem) {
+                                    await db.update(items).set({ stock: dbItem.stock + orderItem.quantity }).where(eq(items.id, orderItem.item_id));
+                                }
+                            }
+                            logger.info({ orderId: data.orderId }, "stock restored for failed order");
+                        }
+                    } catch (err) {
+                        logger.error(err, "error processing event");
+                    }
+
+                    consumerChannel.ack(msg);
+                });
             });
 
             logger.info("inventory-consumer started");

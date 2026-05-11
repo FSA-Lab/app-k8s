@@ -1,6 +1,7 @@
 import "@shared/tracing";
 import express, { Request, Response } from "express";
 import amqp from "amqplib";
+import { propagation, context } from "@opentelemetry/api";
 
 import { db, checkDb } from "./db/db";
 import { orders, orderItems } from "./db/schema";
@@ -46,34 +47,41 @@ async function bootstrap() {
             consumerChannel.consume(q.queue, async (msg) => {
                 if (!msg) return;
 
-                const data = JSON.parse(msg.content.toString());
-                const routingKey = msg.fields.routingKey;
+                const extractedContext = propagation.extract(
+                    context.active(),
+                    msg.properties?.headers ?? {}
+                );
 
-                logger.info({ routingKey, orderId: data.orderId }, "event received");
+                context.with(extractedContext, async () => {
+                    const data = JSON.parse(msg.content.toString());
+                    const routingKey = msg.fields.routingKey;
 
-                if (routingKey === EVENTS.INVENTORY_FAILED) {
-                    await db.update(orders).set({ status: "failed" }).where(eq(orders.id, data.orderId));
-                    logger.info({ orderId: data.orderId }, "order failed (inventory)");
-                }
+                    logger.info({ routingKey, orderId: data.orderId }, "event received");
 
-                if (routingKey === EVENTS.PAYMENT_FAILED) {
-                    await db.update(orders).set({ status: "failed" }).where(eq(orders.id, data.orderId));
+                    if (routingKey === EVENTS.INVENTORY_FAILED) {
+                        await db.update(orders).set({ status: "failed" }).where(eq(orders.id, data.orderId));
+                        logger.info({ orderId: data.orderId }, "order failed (inventory)");
+                    }
 
-                    const orderItemsList = await db.select().from(orderItems).where(eq(orderItems.order_id, data.orderId));
-                    await publishEvent(EVENTS.ORDER_FAILED, {
-                        orderId: data.orderId,
-                        userId: data.userId,
-                        items: orderItemsList.map(i => ({ item_id: i.item_id, quantity: i.quantity })),
-                    });
-                    logger.info({ orderId: data.orderId }, "order failed (payment) — stock rollback published");
-                }
+                    if (routingKey === EVENTS.PAYMENT_FAILED) {
+                        await db.update(orders).set({ status: "failed" }).where(eq(orders.id, data.orderId));
 
-                if (routingKey === EVENTS.PAYMENT_COMPLETED) {
-                    await db.update(orders).set({ status: "done" }).where(eq(orders.id, data.orderId));
-                    logger.info({ orderId: data.orderId }, "order completed");
-                }
+                        const orderItemsList = await db.select().from(orderItems).where(eq(orderItems.order_id, data.orderId));
+                        await publishEvent(EVENTS.ORDER_FAILED, {
+                            orderId: data.orderId,
+                            userId: data.userId,
+                            items: orderItemsList.map(i => ({ item_id: i.item_id, quantity: i.quantity })),
+                        });
+                        logger.info({ orderId: data.orderId }, "order failed (payment) — stock rollback published");
+                    }
 
-                consumerChannel.ack(msg);
+                    if (routingKey === EVENTS.PAYMENT_COMPLETED) {
+                        await db.update(orders).set({ status: "done" }).where(eq(orders.id, data.orderId));
+                        logger.info({ orderId: data.orderId }, "order completed");
+                    }
+
+                    consumerChannel.ack(msg);
+                });
             });
 
             logger.info("order-consumer started");
