@@ -3,7 +3,7 @@ FROM node:24-slim
 WORKDIR /app
 
 # Copy root package.json and workspace definition
-COPY package.json ./
+COPY package.json package-lock.json* ./
 
 # Copy packages
 COPY services/inventory-service ./services/inventory-service
