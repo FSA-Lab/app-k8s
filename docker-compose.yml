@@ -100,6 +100,7 @@ services:
       - JWT_SECRET=super-secret-key-for-lab-only
       - OTEL_SERVICE_NAME=auth-service
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+      - OTEL_EXPORTER_OTLP_LOGS_PROTOCOL=http/json
     ports:
       - "3000:3000"
     depends_on:
@@ -120,6 +121,7 @@ services:
       - JWT_SECRET=super-secret-key-for-lab-only
       - OTEL_SERVICE_NAME=inventory-service
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+      - OTEL_EXPORTER_OTLP_LOGS_PROTOCOL=http/json
     ports:
       - "3001:3000"
     depends_on:
@@ -140,6 +142,7 @@ services:
       - JWT_SECRET=super-secret-key-for-lab-only
       - OTEL_SERVICE_NAME=order-service
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+      - OTEL_EXPORTER_OTLP_LOGS_PROTOCOL=http/json
     ports:
       - "3002:3000"
     depends_on:
@@ -161,6 +164,7 @@ services:
       - AUTH_SERVICE_URL=http://auth-service:3000
       - OTEL_SERVICE_NAME=payment-service
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+      - OTEL_EXPORTER_OTLP_LOGS_PROTOCOL=http/json
     ports:
       - "3003:3000"
     depends_on:
@@ -178,8 +182,6 @@ services:
       dockerfile: ./services/auth-service/Dockerfile
     environment:
       - DATABASE_URL=postgres://root:password@auth-db:5432/auth
-      - RABBITMQ_URL=amqp://rabbitmq:5672
-      - JWT_SECRET=super-secret-key-for-lab-only
     command: npx drizzle-kit push
     depends_on:
       auth-db:
@@ -191,8 +193,6 @@ services:
       dockerfile: ./services/inventory-service/Dockerfile
     environment:
       - DATABASE_URL=postgres://root:password@inventory-db:5432/inventory
-      - RABBITMQ_URL=amqp://rabbitmq:5672
-      - JWT_SECRET=super-secret-key-for-lab-only
     command: npx drizzle-kit push
     depends_on:
       inventory-db:
@@ -204,8 +204,6 @@ services:
       dockerfile: ./services/order-service/Dockerfile
     environment:
       - DATABASE_URL=postgres://root:password@order-db:5432/order
-      - RABBITMQ_URL=amqp://rabbitmq:5672
-      - JWT_SECRET=super-secret-key-for-lab-only
     command: npx drizzle-kit push
     depends_on:
       order-db:
@@ -217,14 +215,20 @@ services:
       dockerfile: ./services/payment-service/Dockerfile
     environment:
       - DATABASE_URL=postgres://root:password@payment-db:5432/payment
-      - RABBITMQ_URL=amqp://rabbitmq:5672
-      - JWT_SECRET=super-secret-key-for-lab-only
     command: npx drizzle-kit push
     depends_on:
       payment-db:
         condition: service_healthy
 
   # Observability stack
+  loki:
+    image: grafana/loki:latest
+    command: ["-config.file=/etc/loki/loki-config.yml"]
+    volumes:
+      - ./loki/loki-config.yml:/etc/loki/loki-config.yml:ro
+    ports:
+      - "3100:3100"
+
   jaeger:
     image: jaegertracing/all-in-one:latest
     ports:
@@ -233,7 +237,7 @@ services:
       - COLLECTOR_OTLP_ENABLED=true
 
   otel-collector:
-    image: otel/opentelemetry-collector:latest
+    image: otel/opentelemetry-collector-contrib:latest
     command: ["--config=/etc/otel-config.yml"]
     volumes:
       - ./otel/otel-config.yml:/etc/otel-config.yml:ro
@@ -241,6 +245,7 @@ services:
       - "4318:4318"
     depends_on:
       - jaeger
+      - loki
 
   prometheus:
     image: prom/prometheus:latest
