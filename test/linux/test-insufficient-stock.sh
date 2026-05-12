@@ -25,7 +25,7 @@ curl -s -X POST "$BASE_URL/auth/seed-admin" -H "Content-Type: application/json" 
 TOKEN=$(curl -s -X POST "$BASE_URL/auth/login" -H "Content-Type: application/json" -d '{"email":"admin2@test.com","password":"password"}' | grep -o '"token":"[^"]*"' | cut -d'"' -f4)
 
 # Create item with stock=2 and capture ID from response
-GEM_ID=$(curl -s -X POST "$BASE_URL/items" -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" -d '{"name":"Rare Gem","stock":2,"price":100}' | grep -oP '"id":\K\d+')
+GEM_ID=$(curl -s -X POST "$BASE_URL/items" -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" -d '{"name":"Rare Gem","stock":2,"price":100}' | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
 echo "  Created Rare Gem (id=$GEM_ID, stock=2)"
 
 curl -s -X POST "$BASE_URL/auth/signup" -H "Content-Type: application/json" -d '{"name":"User2","email":"user2@test.com","password":"password123"}' > /dev/null 2>&1 || true
@@ -45,7 +45,7 @@ ORDER=$(curl -s -X GET "$BASE_URL/orders/$ORDER_ID" -H "Authorization: Bearer $T
 STATUS=$(echo "$ORDER" | grep -o '"status":"[^"]*"' | head -1 | cut -d'"' -f4)
 assert "Order status = failed" "$([ "$STATUS" = "failed" ] && echo true || echo false)" "$STATUS"
 
-STOCK=$(curl -s -X GET "$BASE_URL/items" -H "Authorization: Bearer $TOKEN" | grep -oP "\"id\":$GEM_ID,\"name\":\"Rare Gem\",\"stock\":\K[0-9]+")
+STOCK=$(curl -s -X GET "$BASE_URL/items" -H "Authorization: Bearer $TOKEN" | sed -n "s/.*\"id\":$GEM_ID,\"name\":\"Rare Gem\",\"stock\":\([0-9]*\).*/\1/p")
 assert "Stock unchanged = 2" "$([ "$STOCK" = "2" ] && echo true || echo false)" "$STOCK"
 
 COINS=$(curl -s -X GET "$BASE_URL/auth/me" -H "Authorization: Bearer $TOKEN" | grep -o '"coin":[0-9]*' | cut -d: -f2)

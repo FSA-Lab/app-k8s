@@ -25,7 +25,7 @@ curl -s -X POST "$BASE_URL/auth/seed-admin" -H "Content-Type: application/json" 
 TOKEN=$(curl -s -X POST "$BASE_URL/auth/login" -H "Content-Type: application/json" -d '{"email":"admin3@test.com","password":"password"}' | grep -o '"token":"[^"]*"' | cut -d'"' -f4)
 
 # Create item with stock=10 and capture ID from response
-SWORD_ID=$(curl -s -X POST "$BASE_URL/items" -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" -d '{"name":"Sword","stock":10,"price":500}' | grep -oP '"id":\K\d+')
+SWORD_ID=$(curl -s -X POST "$BASE_URL/items" -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" -d '{"name":"Sword","stock":10,"price":500}' | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
 echo "  Created Sword (id=$SWORD_ID, stock=10)"
 
 curl -s -X POST "$BASE_URL/auth/signup" -H "Content-Type: application/json" -d '{"name":"Broke","email":"broke3@test.com","password":"password123"}' > /dev/null 2>&1 || true
@@ -45,13 +45,13 @@ ORDER=$(curl -s -X GET "$BASE_URL/orders/$ORDER_ID" -H "Authorization: Bearer $T
 STATUS=$(echo "$ORDER" | grep -o '"status":"[^"]*"' | head -1 | cut -d'"' -f4)
 assert "Order status = failed" "$([ "$STATUS" = "failed" ] && echo true || echo false)" "$STATUS"
 
-STOCK=$(curl -s -X GET "$BASE_URL/items" -H "Authorization: Bearer $TOKEN" | grep -oP "\"id\":$SWORD_ID,\"name\":\"Sword\",\"stock\":\K[0-9]+")
+STOCK=$(curl -s -X GET "$BASE_URL/items" -H "Authorization: Bearer $TOKEN" | sed -n "s/.*\"id\":$SWORD_ID,\"name\":\"Sword\",\"stock\":\([0-9]*\).*/\1/p")
 assert "Stock restored = 10" "$([ "$STOCK" = "10" ] && echo true || echo false)" "$STOCK"
 
 COINS=$(curl -s -X GET "$BASE_URL/auth/me" -H "Authorization: Bearer $TOKEN" | grep -o '"coin":[0-9]*' | cut -d: -f2)
 assert "User coins unchanged = 1000" "$([ "$COINS" = "1000" ] && echo true || echo false)" "$COINS"
 
-PAY_STATUS=$(curl -s -X GET "$BASE_URL/payments" -H "Authorization: Bearer $TOKEN" | grep -o "\"order_id\":$ORDER_ID,\"price\":1500,\"status\":\"[^\"]*\"" | grep -o '"status":"[^"]*"' | cut -d'"' -f4)
+PAY_STATUS=$(curl -s -X GET "$BASE_URL/payments" -H "Authorization: Bearer $TOKEN" | sed -n "s/.*\"order_id\":$ORDER_ID,\"price\":1500,\"status\":\"\([^\"]*\)\".*/\1/p" | head -1)
 assert "Payment status = failed" "$([ "$PAY_STATUS" = "failed" ] && echo true || echo false)" "$PAY_STATUS"
 
 echo ""

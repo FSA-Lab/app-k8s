@@ -24,6 +24,8 @@ COPY shared/packages/events/package.json ./shared/packages/events/
 COPY shared/packages/tracing/package.json ./shared/packages/tracing/
 RUN npm ci --omit=dev
 COPY --from=build /app/services/auth-service/dist/bundle.js ./services/auth-service/dist/bundle.js
+COPY --from=build /app/services/auth-service/drizzle.config.ts ./services/auth-service/drizzle.config.ts
+COPY --from=build /app/services/auth-service/src/db/schema.ts ./services/auth-service/src/db/schema.ts
 WORKDIR /app/services/auth-service
 EXPOSE 3000
 CMD ["node", "dist/bundle.js"]

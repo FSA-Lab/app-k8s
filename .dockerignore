@@ -5,3 +5,12 @@ node_modules
 docker-compose.yml
 test/
 services/*/.dockerignore
+scripts/
+grafana/
+prometheus/
+otel/
+kong/
+jenkins/
+.claude/
+plan-phase-*.md
+testing-output.txt

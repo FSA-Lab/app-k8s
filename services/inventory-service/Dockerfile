@@ -24,6 +24,8 @@ COPY shared/packages/events/package.json ./shared/packages/events/
 COPY shared/packages/tracing/package.json ./shared/packages/tracing/
 RUN npm ci --omit=dev
 COPY --from=build /app/services/inventory-service/dist/bundle.js ./services/inventory-service/dist/bundle.js
+COPY --from=build /app/services/inventory-service/drizzle.config.ts ./services/inventory-service/drizzle.config.ts
+COPY --from=build /app/services/inventory-service/src/db/schema.ts ./services/inventory-service/src/db/schema.ts
 WORKDIR /app/services/inventory-service
 EXPOSE 3000
 CMD ["node", "dist/bundle.js"]

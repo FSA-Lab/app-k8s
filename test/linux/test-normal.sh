@@ -25,8 +25,8 @@ curl -s -X POST "$BASE_URL/auth/seed-admin" -H "Content-Type: application/json" 
 TOKEN=$(curl -s -X POST "$BASE_URL/auth/login" -H "Content-Type: application/json" -d '{"email":"admin1@test.com","password":"password"}' | grep -o '"token":"[^"]*"' | cut -d'"' -f4)
 
 # Create items and capture IDs from responses
-SWORD_ID=$(curl -s -X POST "$BASE_URL/items" -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" -d '{"name":"Sword","stock":10,"price":500}' | grep -oP '"id":\K\d+')
-SHIELD_ID=$(curl -s -X POST "$BASE_URL/items" -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" -d '{"name":"Shield","stock":5,"price":300}' | grep -oP '"id":\K\d+')
+SWORD_ID=$(curl -s -X POST "$BASE_URL/items" -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" -d '{"name":"Sword","stock":10,"price":500}' | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+SHIELD_ID=$(curl -s -X POST "$BASE_URL/items" -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" -d '{"name":"Shield","stock":5,"price":300}' | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
 
 curl -s -X POST "$BASE_URL/auth/signup" -H "Content-Type: application/json" -d '{"name":"User1","email":"user1@test.com","password":"password123"}' > /dev/null 2>&1 || true
 TOKEN=$(curl -s -X POST "$BASE_URL/auth/login" -H "Content-Type: application/json" -d '{"email":"user1@test.com","password":"password123"}' | grep -o '"token":"[^"]*"' | cut -d'"' -f4)
@@ -46,15 +46,15 @@ STATUS=$(echo "$ORDER" | grep -o '"status":"[^"]*"' | head -1 | cut -d'"' -f4)
 assert "Order status = done" "$([ "$STATUS" = "done" ] && echo true || echo false)" "$STATUS"
 
 ITEMS=$(curl -s -X GET "$BASE_URL/items" -H "Authorization: Bearer $TOKEN")
-SWORD_STOCK=$(echo "$ITEMS" | grep -oP "\"id\":$SWORD_ID,\"name\":\"Sword\",\"stock\":\K[0-9]+")
-SHIELD_STOCK=$(echo "$ITEMS" | grep -oP "\"id\":$SHIELD_ID,\"name\":\"Shield\",\"stock\":\K[0-9]+")
+SWORD_STOCK=$(echo "$ITEMS" | sed -n "s/.*\"id\":$SWORD_ID,\"name\":\"Sword\",\"stock\":\([0-9]*\).*/\1/p")
+SHIELD_STOCK=$(echo "$ITEMS" | sed -n "s/.*\"id\":$SHIELD_ID,\"name\":\"Shield\",\"stock\":\([0-9]*\).*/\1/p")
 assert "Sword stock = 9" "$([ "$SWORD_STOCK" = "9" ] && echo true || echo false)" "$SWORD_STOCK"
 assert "Shield stock = 4" "$([ "$SHIELD_STOCK" = "4" ] && echo true || echo false)" "$SHIELD_STOCK"
 
 COINS=$(curl -s -X GET "$BASE_URL/auth/me" -H "Authorization: Bearer $TOKEN" | grep -o '"coin":[0-9]*' | cut -d: -f2)
 assert "User coins = 200" "$([ "$COINS" = "200" ] && echo true || echo false)" "$COINS"
 
-PAY_STATUS=$(curl -s -X GET "$BASE_URL/payments" -H "Authorization: Bearer $TOKEN" | grep -o "\"order_id\":$ORDER_ID,\"price\":800,\"status\":\"[^\"]*\"" | grep -o '"status":"[^"]*"' | cut -d'"' -f4)
+PAY_STATUS=$(curl -s -X GET "$BASE_URL/payments" -H "Authorization: Bearer $TOKEN" | sed -n "s/.*\"order_id\":$ORDER_ID,\"price\":800,\"status\":\"\([^\"]*\)\".*/\1/p" | head -1)
 assert "Payment status = paid" "$([ "$PAY_STATUS" = "paid" ] && echo true || echo false)" "$PAY_STATUS"
 
 echo ""
