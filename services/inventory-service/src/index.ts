@@ -165,6 +165,36 @@ async function bootstrap() {
         );
 
         /**
+         * DELETE /items/:id
+         * admin only
+         */
+        app.delete(
+            "/items/:id",
+            authMiddleware,
+            adminMiddleware,
+            async (req: Request, res: Response) => {
+                try {
+                    const id = Number(req.params.id);
+
+                    const deleted = await db
+                        .delete(items)
+                        .where(eq(items.id, id))
+                        .returning();
+
+                    if (deleted.length === 0) {
+                        return res.status(404).json({ message: "Item not found" });
+                    }
+
+                    logger.info({ item: deleted[0] }, "item deleted");
+                    return res.json({ message: "Item deleted", item: deleted[0] });
+                } catch (err) {
+                    logger.error(err, "delete item failed");
+                    return res.status(500).json({ message: "Failed to delete item" });
+                }
+            }
+        );
+
+        /**
          * PATCH /items/:id/stock
          * queue consumer or admin
          */
