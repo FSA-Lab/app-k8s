@@ -23,16 +23,13 @@ pipeline {
                         sh "npm ci"
                     }
                 }
-                container('docker') {
-                    sh "echo $DOCKERHUB_CREDENTIALS_PSW | docker login -u $DOCKERHUB_CREDENTIALS_USR --password-stdin"
-                    sh "docker build -t ${DOCKERHUB_REPO}/auth-service:${env.SHORT_SHA} -f services/auth-service/Dockerfile ."
-                    sh "docker push ${DOCKERHUB_REPO}/auth-service:${env.SHORT_SHA}"
-                    sh "docker build -t ${DOCKERHUB_REPO}/inventory-service:${env.SHORT_SHA} -f services/inventory-service/Dockerfile ."
-                    sh "docker push ${DOCKERHUB_REPO}/inventory-service:${env.SHORT_SHA}"
-                    sh "docker build -t ${DOCKERHUB_REPO}/order-service:${env.SHORT_SHA} -f services/order-service/Dockerfile ."
-                    sh "docker push ${DOCKERHUB_REPO}/order-service:${env.SHORT_SHA}"
-                    sh "docker build -t ${DOCKERHUB_REPO}/payment-service:${env.SHORT_SHA} -f services/payment-service/Dockerfile ."
-                    sh "docker push ${DOCKERHUB_REPO}/payment-service:${env.SHORT_SHA}"
+                container('buildkit') {
+                    sh "mkdir -p /root/.docker && echo '{\"auths\":{\"https://index.docker.io/v1/\":{\"auth\":\"'$(echo -n ${DOCKERHUB_CREDENTIALS_USR}:${DOCKERHUB_CREDENTIALS_PSW} | base64 -w0)'\"}}}' > /root/.docker/config.json"
+                    script {
+                        for (svc in SERVICES.split(' ')) {
+                            sh "buildctl build --frontend dockerfile.v0 --local context=. --local dockerfile=. --opt filename=services/${svc}/Dockerfile --output type=image,name=docker.io/${DOCKERHUB_REPO}/${svc}:${env.SHORT_SHA},push=true"
+                        }
+                    }
                 }
             }
         }
