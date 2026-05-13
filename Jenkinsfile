@@ -45,8 +45,10 @@ pipeline {
                     dir('manifests') {
                         sh "git checkout develop"
                         dir("k8s/overlays/staging") {
-                            for (svc in SERVICES.split(' ')) {
-                                sh "kustomize edit set image ${svc}=${DOCKERHUB_REPO}/${svc}:${env.SHORT_SHA}"
+                            script {
+                                for (svc in SERVICES.split(' ')) {
+                                    sh "kustomize edit set image ${svc}=${DOCKERHUB_REPO}/${svc}:${env.SHORT_SHA}"
+                                }
                             }
                         }
                         sh 'git config user.email "jenkins@ci.local"'
