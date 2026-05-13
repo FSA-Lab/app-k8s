@@ -10,20 +10,17 @@ spec:
       command: ['cat']
       tty: true
     - name: docker
-      image: docker:24-dind
+      image: moby/buildkit:v0.29.0-rootless
       securityContext:
         privileged: true
-      env:
-        - name: DOCKER_TLS_CERTDIR
-          value: ""
+      command: ['sh', '-c', 'buildkitd --addr unix:///run/buildkit/buildkitd.sock']
       volumeMounts:
-        - name: docker-socket
-          mountPath: /var/run/docker.sock
+        - name: buildkit-socket
+          mountPath: /run/buildkit
     - name: kustomize
-      image: kustomize/kustomize:latest
+      image: kustomize/kustomize:v5.6.0
       command: ['cat']
       tty: true
   volumes:
-    - name: docker-socket
-      hostPath:
-        path: /var/run/docker.sock
+    - name: buildkit-socket
+      emptyDir: {}
