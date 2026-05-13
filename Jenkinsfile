@@ -3,7 +3,7 @@ pipeline {
 
     environment {
         DOCKERHUB_CREDENTIALS = credentials('dockerhub-creds')
-        DOCKERHUB_REPO        = "${env.DOCKERHUB_REPO ?: 'hungnv2511'}'
+        DOCKERHUB_REPO        = 'hungnv2511'
         MANIFEST_REPO_URL     = 'https://github.com/FSA-Lab/app-k8s-manifests.git'
         MANIFEST_REPO_CREDS   = credentials('manifest-repo-creds')
         SERVICES              = 'auth-service inventory-service order-service payment-service'
