@@ -321,6 +321,124 @@ AKS Cluster
 
 ---
 
+## Deploying to Another AKS Cluster
+
+### What's in the manifest repo (no action needed)
+
+Everything in `app-k8s-manifests` is portable:
+- All Deployments, Services, ConfigMaps, PVCs, Jobs
+- ConfigMap env vars (`OTEL_SERVICE_NAME`, `OTEL_EXPORTER_OTLP_ENDPOINT`)
+- Kustomize overlays for staging/prod namespaces
+- ArgoCD Application CRDs
+
+### What you must do manually on the new cluster
+
+#### 1. Create namespaces
+```bash
+kubectl create namespace infra staging prod jenkins argocd
+```
+
+#### 2. Create secrets
+These are NOT in Git. Exact commands used on `lab-cluster`:
+
+```bash
+# Postgres credentials (shared by all 4 DBs)
+for ns in staging prod; do
+  kubectl create secret generic postgres-secrets \
+    --from-literal=POSTGRES_USER='root' \
+    --from-literal=POSTGRES_PASSWORD='<your-postgres-password>' \
+    -n $ns
+done
+
+# Grafana admin password
+kubectl create secret generic grafana-secrets \
+  --from-literal=GF_SECURITY_ADMIN_PASSWORD='<your-grafana-password>' \
+  -n infra
+
+# Per-service secrets (DATABASE_URL, RABBITMQ_URL, JWT_SECRET)
+for ns in staging prod; do
+  for svc in auth inventory order payment; do
+    kubectl create secret generic ${svc}-service-secrets \
+      --from-literal=DATABASE_URL="postgres://root:<your-postgres-password>@${svc}-db.${ns}.svc.cluster.local:5432/${svc}" \
+      --from-literal=RABBITMQ_URL="amqp://rabbitmq.${ns}.svc.cluster.local:5672" \
+      --from-literal=JWT_SECRET='<your-jwt-secret>' \
+      -n $ns
+  done
+done
+```
+
+Replace `<your-postgres-password>` and `<your-jwt-secret>` with your actual values.
+
+#### 3. Toleration and nodeSelector patches
+
+The staging `kustomization.yaml` has patches that pin pods to specific node pools:
+
+```yaml
+# These patches force pods onto the "apps" node pool
+- target:
+    kind: Deployment
+  patch: |
+    - op: add
+      path: /spec/template/spec/tolerations
+      value:
+        - key: workload
+          operator: Equal
+          value: apps
+          effect: NoSchedule
+    - op: add
+      path: /spec/template/spec/nodeSelector
+      value:
+        kubernetes.azure.com/agentpool: apps
+```
+
+**When to keep them:** Your AKS cluster has multiple node pools with taints (e.g., `apps` node with `workload=apps:NoSchedule`).
+
+**When to remove them:** Your cluster has a single default node pool (no taints). If you keep these patches on a cluster without matching node labels/taints, pods will fail to schedule with `node(s) had untolerated taint` or `node(s) didn't match node selector`.
+
+Also check the `inventory-db` override — it was pinned to the `system` node pool because the `apps` node ran out of CPU:
+```yaml
+- target:
+    kind: Deployment
+    name: inventory-db
+  patch: |
+    - op: replace
+      path: /spec/template/spec/tolerations
+      value: []
+    - op: replace
+      path: /spec/template/spec/nodeSelector
+      value:
+        kubernetes.azure.com/agentpool: system
+```
+
+#### 4. Install ArgoCD + create Application CRDs
+
+```bash
+kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+kubectl apply -f argocd/staging-app.yaml
+kubectl apply -f argocd/prod-app.yaml
+```
+
+#### 5. Build and push images
+
+```bash
+# From app-k8s repo
+bash scripts/ci.sh
+```
+
+This builds all 4 service images, pushes to DockerHub, and updates image tags in the manifest repo.
+
+### Summary checklist
+
+| Item | Where | Action |
+|------|-------|--------|
+| Namespaces | kubectl | `kubectl create namespace` |
+| Secrets (6 total) | kubectl | `kubectl create secret` commands above |
+| Toleration/nodeSelector patches | `k8s/overlays/staging/kustomization.yaml` | Adjust or remove based on your cluster's node pools |
+| ArgoCD | kubectl | Install + apply Application CRDs |
+| Docker images | DockerHub | Run `scripts/ci.sh` or push manually |
+
+---
+
 ## Troubleshooting
 
 ```bash

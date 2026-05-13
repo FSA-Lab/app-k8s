@@ -1,7 +1,10 @@
 # Test Case 3: Insufficient Coins (with stock rollback)
 # Stock is sufficient but user can't afford it. Stock gets deducted then rolled back.
 
-$BASE_URL = "http://localhost:8000"
+param(
+    [string]$BaseUrl = "http://localhost:8000"
+)
+$BASE_URL = $BaseUrl
 $passed = $true
 
 function Invoke-Api {

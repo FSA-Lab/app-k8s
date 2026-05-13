@@ -124,7 +124,7 @@ pipeline {
 
         stage('Update Manifest Repo') {
             steps {
-                container('kustomize') {
+                container('node') {
                     script {
                         def overlay = env.BRANCH_NAME == 'main' ? 'prod' : 'staging'
 
@@ -132,6 +132,9 @@ pipeline {
                         sh "git clone https://${MANIFEST_REPO_CREDS}@github.com/FSA-Lab/app-k8s-manifests.git manifests"
                         dir('manifests') {
                             sh "git checkout ${env.BRANCH_NAME}"
+
+                            // Install kustomize
+                            sh 'curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash && mv kustomize /usr/local/bin/'
 
                             // Update image tags
                             dir("k8s/overlays/${overlay}") {
@@ -158,9 +161,7 @@ pipeline {
             echo "Pipeline failed — branch: ${env.BRANCH_NAME}, commit: ${env.SHORT_SHA}"
         }
         cleanup {
-            container('buildkit') {
-                sh 'buildctl prune --keep-duration 0 || true'
-            }
+            echo "Pipeline finished — branch: ${env.BRANCH_NAME}, commit: ${env.SHORT_SHA}"
         }
     }
 }

@@ -1,7 +1,10 @@
 # Test Case 1: Normal Flow (Happy Path)
 # Order has sufficient stock AND user has enough coins. Order completes successfully.
 
-$BASE_URL = "http://localhost:8000"
+param(
+    [string]$BaseUrl = "http://localhost:8000"
+)
+$BASE_URL = $BaseUrl
 $passed = $true
 
 function Invoke-Api {

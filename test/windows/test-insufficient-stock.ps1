@@ -1,7 +1,10 @@
 # Test Case 2: Insufficient Stock
 # Order requests more items than available. Inventory rejects, stock is never deducted.
 
-$BASE_URL = "http://localhost:8000"
+param(
+    [string]$BaseUrl = "http://localhost:8000"
+)
+$BASE_URL = $BaseUrl
 $passed = $true
 
 function Invoke-Api {

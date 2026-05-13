@@ -3,7 +3,7 @@
 # Stock is sufficient but user can't afford it. Stock gets deducted then rolled back.
 
 set -e
-BASE_URL="http://localhost:8000"
+BASE_URL="${1:-http://localhost:8000}"
 PASSED=true
 
 assert() {

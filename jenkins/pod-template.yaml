@@ -9,7 +9,7 @@ spec:
       image: node:24-slim
       command: ['cat']
       tty: true
-    - name: docker
+    - name: buildkit
       image: moby/buildkit:v0.29.0-rootless
       securityContext:
         privileged: true
@@ -17,10 +17,6 @@ spec:
       volumeMounts:
         - name: buildkit-socket
           mountPath: /run/buildkit
-    - name: kustomize
-      image: kustomize/kustomize:v5.6.0
-      command: ['cat']
-      tty: true
   volumes:
     - name: buildkit-socket
       emptyDir: {}
