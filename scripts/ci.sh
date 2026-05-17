@@ -66,6 +66,8 @@ if [ "$SKIP_PUSH" = "true" ]; then
     exit 0
 fi
 
+command -v kustomize &>/dev/null || { echo "Error: kustomize not found. Install: https://kustomize.io/"; exit 1; }
+
 echo "[MANIFEST] Cloning manifest repo..."
 TMPDIR=$(mktemp -d)
 git clone --depth 1 -b "$BRANCH" "$MANIFEST_REPO" "$TMPDIR/manifests"
@@ -75,7 +77,7 @@ cd "k8s/overlays/$OVERLAY"
 
 for svc in $SERVICES; do
     echo "[MANIFEST] Setting $svc=$DOCKERHUB_REPO/$svc:$SHORT_SHA"
-    sed -i "s|newTag:.*|newTag: \"$SHORT_SHA\"|g" kustomization.yaml
+    kustomize edit set image "$svc=$DOCKERHUB_REPO/$svc:$SHORT_SHA"
 done
 
 cd "$TMPDIR/manifests"
